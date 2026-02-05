@@ -24,6 +24,7 @@ public:
     const std::vector<Router*>& getRouters() const { return m_routers; }
     const std::vector<NetworkInterface*>& getNIs() const { return m_nis; }
     const std::vector<SimpleTrafficGenerator*>& getTGs() const { return m_tgs; }
+    const std::vector<NetworkLink*>& getLinks() const { return m_links; }
 
     // Factory method
     static Topology* create(std::string name, GarnetNetwork* net, int rows, int cols);
@@ -31,7 +32,8 @@ public:
 protected:
     // Helper to connect two routers
     void connectRouters(int src_id, int dest_id, int link_id_base, 
-                        std::string src_out_dir, std::string dest_in_dir);
+                        std::string src_out_dir, std::string dest_in_dir,
+                        int latency = 1);
 
     // Helper to connect NI to Router
     void connectNiToRouter(int ni_id, int router_id, int link_id_base);

@@ -82,6 +82,11 @@ InputUnit::wakeup()
         int vc = t_flit->get_vc();
         t_flit->increment_hops(); // for stats
 
+        if (m_router->get_net_ptr()->getDebug()) {
+            std::cout << "[Cycle " << current_time << "] Router " << m_router->get_id() 
+                      << " RECEIVED flit " << t_flit->get_id() << " at port " << m_direction << std::endl;
+        }
+
         if ((t_flit->get_type() == HEAD_) ||
             (t_flit->get_type() == HEAD_TAIL_)) {
 

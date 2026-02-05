@@ -50,6 +50,7 @@ class NetworkInterface : public Consumer
     void addOutPort(NetworkLink *out_link, CreditLink *credit_link,
         SwitchID router_id, uint32_t consumerVcs);
 
+    void init(); // Added init method
     void wakeup();
 
     // New interface for traffic generators
@@ -57,7 +58,7 @@ class NetworkInterface : public Consumer
     flit* flit_eject();
 
     // Method to attach the traffic generator
-    void set_traffic_generator(SimpleTrafficGenerator* tg);
+    void setTrafficGenerator(SimpleTrafficGenerator* tg);
 
     void print(std::ostream& out) const;
     int get_vnet(int vc);

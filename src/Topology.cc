@@ -1,5 +1,7 @@
 #include "Topology.hh"
+#include "FileTopology.hh"
 #include <iostream>
+#include <unistd.h> // For readlink
 
 namespace garnet {
 
@@ -25,18 +27,72 @@ Topology* Topology::create(std::string name, GarnetNetwork* net, int rows, int c
     if (name == "Mesh_XY") {
         return new MeshTopology(net, rows, cols);
     }
+    
+    // Check if it is a config file
+    if (name.length() > 5 && name.substr(name.length() - 5) == ".conf") {
+        return new FileTopology(net, name);
+    }
+    
+    // Check if it is a python topology file
+    if (name.length() > 3 && name.substr(name.length() - 3) == ".py") {
+        std::string conf_file = "topology.conf";
+        
+        // Find path to executable to locate python script relative to it
+        char result[4096];
+        ssize_t count = readlink("/proc/self/exe", result, 4096);
+        std::string exe_path;
+        if (count != -1) {
+            exe_path = std::string(result, count);
+            // Remove executable name to get directory
+            size_t last_slash = exe_path.find_last_of("/");
+            if (last_slash != std::string::npos) {
+                exe_path = exe_path.substr(0, last_slash);
+            }
+        } else {
+            // Fallback
+            exe_path = "garnet_standalone"; 
+        }
+
+        // Construct path to conf_generator.py
+        // Assumes directory structure: 
+        //   [Exe Dir]
+        //      |-- garnet_standalone (binary)
+        //      |-- python/
+        //            |-- conf_generator.py
+        
+        // The binary is in 'garnet_standalone/' usually. 
+        // If we run from root: ./garnet_standalone/garnet_standalone
+        // Exe path is .../garnet_standalone
+        // Python is .../garnet_standalone/python/conf_generator.py
+        
+        std::string script_path = exe_path + "/python/conf_generator.py";
+        
+        std::string command = "python3 " + script_path + " --topology " + name + 
+                              " --rows " + std::to_string(rows) + 
+                              " --cols " + std::to_string(cols);
+        
+        std::cout << "Compiling Python topology..." << std::endl;
+        int ret = system(command.c_str());
+        if (ret != 0) {
+            std::cerr << "Error: Failed to generate topology config from " << name << std::endl;
+            exit(1);
+        }
+        return new FileTopology(net, conf_file);
+    }
+
     // Future: Add "Mesh_3D", "Torus", etc. here
     std::cerr << "Unknown topology: " << name << ". Defaulting to Mesh_XY." << std::endl;
     return new MeshTopology(net, rows, cols);
 }
 
 void Topology::connectRouters(int src, int dest, int link_id_base, 
-                              std::string src_out_dir, std::string dest_in_dir)
+                              std::string src_out_dir, std::string dest_in_dir,
+                              int latency)
 {
     // Data Link: Src -> Dest
     NetworkLink::Params link_p;
     link_p.id = link_id_base;
-    link_p.latency = 1;
+    link_p.latency = latency;
     link_p.virtual_networks = m_num_vns;
     link_p.net_ptr = m_net;
     NetworkLink* link = new NetworkLink(link_p);
@@ -130,6 +186,7 @@ void MeshTopology::build()
         ni_p.deadlock_threshold = 50000;
         ni_p.net_ptr = m_net;
         m_nis.push_back(new NetworkInterface(ni_p));
+        m_net->registerNI(m_nis.back());
 
         // Traffic Generator (Attached to NI)
         // Note: Using default params for now, can be parameterized later
@@ -137,7 +194,7 @@ void MeshTopology::build()
             i, num_routers, 0.0, m_net, m_nis.back() // 0.0 rate, main.cc will set active
         );
         m_tgs.push_back(tg);
-        m_nis.back()->set_traffic_generator(tg);
+        m_nis.back()->setTrafficGenerator(tg);
     }
 
     // 2. Connect NI <-> Router (Local Links)

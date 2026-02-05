@@ -36,6 +36,7 @@
 #include <cstdint>
 
 #include "CommonTypes.hh"
+#include "NetDest.hh"
 
 namespace garnet
 {
@@ -47,7 +48,8 @@ class flit
     flit(int packet_id, int id, int vc, int vnet, RouteInfo route, int size,
          void* msg_ptr, int MsgSize, uint32_t bWidth, uint64_t curTime);
 
-    virtual ~flit(){};
+    virtual ~flit() {
+    }
 
     int get_outport() {return m_outport; }
     int get_size() { return m_size; }

@@ -5,14 +5,8 @@ namespace garnet
 {
 
 CreditLink::CreditLink(const Params &p)
-    : NetworkLink(NetworkLink::Params())
+    : NetworkLink(p)
 {
-}
-
-void
-CreditLink::scheduleEvent(uint64_t time)
-{
-    link_consumer->scheduleEvent(time);
 }
 
 } // namespace garnet

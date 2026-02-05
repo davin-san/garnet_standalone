@@ -37,6 +37,11 @@ public:
     Event* get_next_event();
     bool is_empty() const;
     uint64_t get_current_time() const;
+    void set_current_time(uint64_t time) { m_current_time = time; }
+    uint64_t peek_next_time() const { 
+        if (m_event_queue.empty()) return (uint64_t)-1;
+        return m_event_queue.top()->get_time();
+    }
 
 private:
     std::priority_queue<Event*, std::vector<Event*>, EventCompare> m_event_queue;

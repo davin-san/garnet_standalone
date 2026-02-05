@@ -1,32 +1,3 @@
-/*
- * Copyright (c) 2008 Princeton University
- * Copyright (c) 2016 Georgia Institute of Technology
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met: redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer;
- * redistributions in binary form must reproduce the above copyright
- * notice, this list of conditions and the following disclaimer in the
- * documentation and/or other materials provided with the distribution;
- * neither the name of the copyright holders nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-
 #include <iostream>
 #include <vector>
 #include <cstdlib>
@@ -38,6 +9,7 @@
 #include "GarnetNetwork.hh"
 #include "Topology.hh"
 #include "EventQueue.hh"
+#include "NetworkLink.hh"
 
 using namespace garnet;
 
@@ -47,26 +19,16 @@ struct SimConfig {
     int sim_cycles = 1000;
     double injection_rate = 0.01;
     int routing_algorithm = 1; // 1 = XY, 0 = Table
-    int packet_size = 1; // 1 = Single Flit
+    int packet_size = 1; 
     std::string topology = "Mesh_XY";
     bool deterministic_test = false;
+    bool debug = false;
+    int seed = 42;
 };
-
-void print_usage(const char* prog_name) {
-    std::cout << "Usage: " << prog_name << " [options]\n"
-              << "Options:\n"
-              << "  --rows <int>        Number of rows (default: 2)\n"
-              << "  --cols <int>        Number of columns (default: 2)\n"
-              << "  --cycles <int>      Simulation cycles (default: 1000)\n"
-              << "  --rate <float>      Injection rate (0.0-1.0, default: 0.01)\n"
-              << "  --packet-size <int> Packet size in flits (default: 1)\n"
-              << "  --routing <int>     0=Table, 1=XY (default: 1)\n"
-              << "  --test-mode         Enable deterministic test (Packet 0->3)\n"
-              << "  --help              Show this message\n";
-}
 
 void parse_args(int argc, char** argv, SimConfig& config) {
     struct option long_options[] = {
+        {"topology", required_argument, 0, 'T'},
         {"rows", required_argument, 0, 'r'},
         {"cols", required_argument, 0, 'c'},
         {"cycles", required_argument, 0, 'n'},
@@ -74,13 +36,14 @@ void parse_args(int argc, char** argv, SimConfig& config) {
         {"packet-size", required_argument, 0, 'p'},
         {"routing", required_argument, 0, 'a'},
         {"test-mode", no_argument, 0, 't'},
-        {"help", no_argument, 0, 'h'},
+        {"debug", no_argument, 0, 'd'},
+        {"seed", required_argument, 0, 's'},
         {0, 0, 0, 0}
     };
-
     int opt;
-    while ((opt = getopt_long(argc, argv, "r:c:n:i:p:a:th", long_options, nullptr)) != -1) {
+    while ((opt = getopt_long(argc, argv, "T:r:c:n:i:p:a:tds:", long_options, nullptr)) != -1) {
         switch (opt) {
+            case 'T': config.topology = optarg; break;
             case 'r': config.num_rows = std::atoi(optarg); break;
             case 'c': config.num_cols = std::atoi(optarg); break;
             case 'n': config.sim_cycles = std::atoi(optarg); break;
@@ -88,8 +51,8 @@ void parse_args(int argc, char** argv, SimConfig& config) {
             case 'p': config.packet_size = std::atoi(optarg); break;
             case 'a': config.routing_algorithm = std::atoi(optarg); break;
             case 't': config.deterministic_test = true; break;
-            case 'h': print_usage(argv[0]); exit(0);
-            default: print_usage(argv[0]); exit(1);
+            case 'd': config.debug = true; break;
+            case 's': config.seed = std::atoi(optarg); break;
         }
     }
 }
@@ -98,15 +61,6 @@ int main(int argc, char** argv) {
     SimConfig config;
     parse_args(argc, argv, config);
 
-    std::cout << "Garnet Standalone Simulation" << std::endl;
-    std::cout << "Topology: " << config.topology 
-              << " (" << config.num_rows << "x" << config.num_cols << ")" << std::endl;
-    std::cout << "Routing: " << (config.routing_algorithm == 1 ? "XY" : "Table") << std::endl;
-    std::cout << "Cycles: " << config.sim_cycles << std::endl;
-
-    srand(time(NULL));
-
-    // 1. Define Network Params
     GarnetNetwork::Params net_params;
     net_params.num_rows = config.num_rows;
     net_params.num_cols = config.num_cols;
@@ -116,55 +70,78 @@ int main(int argc, char** argv) {
     net_params.buffers_per_ctrl_vc = 1;
     net_params.routing_algorithm = config.routing_algorithm;
     net_params.enable_fault_model = false;
+    net_params.enable_debug = config.debug;
 
-    // 2. Instantiate Network
     GarnetNetwork network(net_params);
     network.init();
 
-    // 3. Build Topology
-    Topology* topo = Topology::create(config.topology, &network, 
-                                      config.num_rows, config.num_cols);
+    Topology* topo = Topology::create(config.topology, &network, config.num_rows, config.num_cols);
     topo->build();
 
-    // 4. Configure Traffic Generators
     for (auto tg : topo->getTGs()) {
         tg->set_packet_size(config.packet_size);
+        tg->set_seed(config.seed);
         if (config.deterministic_test) {
-            tg->set_active(true); // Enable test mode
-            tg->set_injection_rate(0.0); // Disable random injection
+            tg->set_active(true);
+            tg->set_injection_rate(0.0);
         } else {
-            tg->set_active(false); // Disable test mode
+            tg->set_active(false);
             tg->set_injection_rate(config.injection_rate);
         }
     }
     
-    std::cout << "Initializing routers..." << std::endl;
-    for (auto router : topo->getRouters()) {
-        router->init();
-    }
-
-    std::cout << "Starting simulation..." << std::endl;
+    for (auto router : topo->getRouters()) router->init();
 
     EventQueue* event_queue = network.getEventQueue();
-
-    // Schedule initial events
-    for (auto ni : topo->getNIs()) {
-        ni->scheduleEvent(1);
+    for (uint64_t t = 0; t <= (uint64_t)config.sim_cycles; t++) {
+        event_queue->set_current_time(t);
+        for (auto ni : topo->getNIs()) ni->wakeup();
+        for (auto router : topo->getRouters()) router->wakeup();
+        while (!event_queue->is_empty() && event_queue->peek_next_time() <= t) {
+            Event* event = event_queue->get_next_event();
+            event->get_obj()->wakeup();
+            delete event;
+        }
     }
 
-    // Run Loop
-    while (!event_queue->is_empty() && event_queue->get_current_time() <= config.sim_cycles) {
-        Event* event = event_queue->get_next_event();
-        event->get_obj()->wakeup();
-        delete event;
+    std::cout << "\nSimulation Statistics:" << std::endl;
+    std::cout << "  - Total Cycles: " << config.sim_cycles << std::endl;
+
+    uint64_t total_latency = 0, total_packets = 0, total_injected = 0;
+    uint64_t vnet_pkts[2] = {0, 0}, vnet_lat[2] = {0, 0};
+
+    for (auto tg : topo->getTGs()) {
+        total_latency += tg->get_total_latency();
+        total_packets += tg->get_received_packets();
+        total_injected += tg->get_injected_packets();
+        vnet_pkts[0] += tg->get_received_vnet(0);
+        vnet_lat[0] += tg->get_latency_vnet(0);
+        vnet_pkts[1] += tg->get_received_vnet(1);
+        vnet_lat[1] += tg->get_latency_vnet(1);
     }
 
-    std::cout << "\nSimulation finished." << std::endl;
-    std::cout << "  - Total Cycles Simulated: " << config.sim_cycles << std::endl;
-    std::cout << "  - Final Event Queue Time: " << network.getEventQueue()->get_current_time() << std::endl;
+    std::cout << "  - Packets Injected: " << total_injected << std::endl;
+    std::cout << "  - Total Packets Received: " << total_packets << std::endl;
+    if (total_packets > 0) {
+        std::cout << "  - Average Network Latency: " << (double)total_latency / total_packets << " cycles" << std::endl;
+        for(int v=0; v<2; v++) {
+            if (vnet_pkts[v] > 0)
+                std::cout << "    - VNet " << v << ": Rx=" << vnet_pkts[v] << ", Lat=" << (double)vnet_lat[v]/vnet_pkts[v] << std::endl;
+        }
+    }
 
-    // Cleanup
-    delete topo; // Topology owns the components now
-    
+    // Link Utilization
+    double total_util = 0;
+    int num_links = topo->getLinks().size();
+    if (num_links > 0) {
+        for (auto link : topo->getLinks()) {
+            total_util += (double)link->getLinkUtilization() / config.sim_cycles;
+        }
+        std::cout << "  - Average Link Utilization: " << (total_util / num_links) * 100.0 << " %" << std::endl;
+    }
+
+    std::cout << "Simulation finished." << std::endl;
+
+    delete topo;
     return 0;
 }

@@ -114,6 +114,8 @@ class Router : public Consumer
     int route_compute(RouteInfo route, int inport, PortDirection direction);
     void grant_switch(int inport, flit *t_flit);
 
+    void addRouteForPort(int port, int dest_ni);
+
     std::string getPortDirectionName(PortDirection direction);
 
     // The following methods are removed for the standalone version
