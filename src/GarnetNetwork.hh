@@ -37,10 +37,9 @@
 
 #include "CommonTypes.hh"
 #include "EventQueue.hh"
-
-// Forward declarations
-class NetDest;
-class FaultModel;
+#include "GarnetStats.hh"
+#include "FaultModel.hh"
+#include "NetDest.hh"
 
 namespace garnet
 {
@@ -56,6 +55,7 @@ class CreditLink;
 struct GarnetNetworkParams {
     uint32_t num_rows;
     uint32_t num_cols;
+    uint32_t num_depth;
     uint32_t ni_flit_size;
     uint32_t vcs_per_vnet;
     uint32_t buffers_per_data_vc;
@@ -72,7 +72,7 @@ class GarnetNetwork
   public:
     typedef GarnetNetworkParams Params;
     GarnetNetwork(const Params &p);
-    ~GarnetNetwork() = default;
+    ~GarnetNetwork();
 
     void init();
 
@@ -84,7 +84,8 @@ class GarnetNetwork
 
     // for 2D topology
     int getNumRows() const { return m_num_rows; }
-    int getNumCols() { return m_num_cols; }
+    int getNumCols() const { return m_num_cols; }
+    int getNumDepth() const { return m_num_depth; }
 
     // for network
     uint32_t getNiFlitSize() const { return m_ni_flit_size; }
@@ -106,46 +107,33 @@ class GarnetNetwork
     int getNumRouters();
     int get_router_id(int ni, int vnet);
     void registerNI(NetworkInterface* ni) { m_nis.push_back(ni); }
-
-
-    // Methods used by Topology to setup the network
-    // These will be simplified or replaced.
-    // For now, we forward declare the types we need.
-    void makeExtOutLink(SwitchID src, NodeID dest,
-                     std::vector<class NetDest>& routing_table_entry);
-    void makeExtInLink(NodeID src, SwitchID dest,
-                    std::vector<class NetDest>& routing_table_entry);
-    void makeInternalLink(SwitchID src, SwitchID dest,
-                          std::vector<class NetDest>& routing_table_entry,
-                          PortDirection src_outport_dirn,
-                          PortDirection dest_inport_dirn);
-
-    // Functional read and write are removed for standalone version.
-    // bool functionalRead(Packet *pkt, WriteMask &mask);
-    // uint32_t functionalWrite(Packet *pkt);
+    void registerRouter(Router* router) { m_routers.push_back(router); }
 
     // Stats
     void print(std::ostream& out) const;
 
-    // The stat incrementing functions will be replaced with a
-    // lightweight standalone stats implementation.
-    void increment_injected_packets(int vnet) { }
-    void increment_received_packets(int vnet) { }
-    void increment_packet_network_latency(uint64_t latency, int vnet) { }
-    void increment_packet_queueing_latency(uint64_t latency, int vnet) { }
-    void increment_injected_flits(int vnet) { }
-    void increment_received_flits(int vnet) { }
-    void increment_flit_network_latency(uint64_t latency, int vnet) { }
-    void increment_flit_queueing_latency(uint64_t latency, int vnet) { }
-    void increment_total_hops(int hops) { }
+    void increment_injected_packets(int vnet) { m_garnetStats.injected_packets[vnet]++; }
+    void increment_received_packets(int vnet) { m_garnetStats.received_packets[vnet]++; }
+    void increment_packet_network_latency(uint64_t latency, int vnet) { m_garnetStats.packet_network_latency[vnet] += latency; }
+    void increment_packet_queueing_latency(uint64_t latency, int vnet) { m_garnetStats.packet_queueing_latency[vnet] += latency; }
+    void increment_injected_flits(int vnet) { m_garnetStats.injected_flits[vnet]++; }
+    void increment_received_flits(int vnet) { m_garnetStats.received_flits[vnet]++; }
+    void increment_flit_network_latency(uint64_t latency, int vnet) { m_garnetStats.flit_network_latency[vnet] += latency; }
+    void increment_flit_queueing_latency(uint64_t latency, int vnet) { m_garnetStats.flit_queueing_latency[vnet] += latency; }
+    void increment_total_hops(int hops) { m_garnetStats.total_hops += hops; }
 
     void update_traffic_distribution(RouteInfo route);
     int getNextPacketID() { return m_next_packet_id++; }
+
+    bool isVNetOrdered(int vnet) { return vnet == 0; } // gem5 defaults VNet 0 to ordered
+
+    GarnetStats& getStats() { return m_garnetStats; }
 
   protected:
     // Configuration
     int m_num_rows;
     int m_num_cols;
+    int m_num_depth;
     uint32_t m_ni_flit_size;
     uint32_t m_max_vcs_per_vnet;
     uint32_t m_buffers_per_ctrl_vc;
@@ -154,7 +142,8 @@ class GarnetNetwork
     bool m_enable_fault_model;
     bool m_debug;
 
-    // Statistical variables (removed)
+    // Statistical variables
+    GarnetStats m_garnetStats;
 
   private:
     GarnetNetwork(const GarnetNetwork& obj);
@@ -182,4 +171,3 @@ operator<<(std::ostream& out, const GarnetNetwork& obj)
 } // namespace garnet
 
 #endif //__GARNET_NETWORK_HH__
-

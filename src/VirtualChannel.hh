@@ -92,10 +92,6 @@ class VirtualChannel
 
     const flitBuffer& getInputBuffer() const;
 
-    // The following methods are removed for the standalone version
-    // bool functionalRead(Packet *pkt, WriteMask &mask);
-    // uint32_t functionalWrite(Packet *pkt);
-
   private:
     flitBuffer inputBuffer;
     std::pair<VC_state_type, uint64_t> m_vc_state;

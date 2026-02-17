@@ -21,7 +21,7 @@ namespace garnet
 {
 
 NetworkInterface::NetworkInterface(const Params &p)
-  : m_id(p.id),
+  : m_id(p.id), m_x(p.x), m_y(p.y), m_z(p.z),
     m_virtual_networks(p.virtual_networks), m_vc_per_vnet(p.vcs_per_vnet),
     m_vc_allocator(m_virtual_networks, 0),
     m_deadlock_threshold(p.deadlock_threshold)
@@ -95,6 +95,16 @@ void NetworkInterface::wakeup()
 
     flit* ejected_flit = flit_eject();
     if (ejected_flit) {
+        m_net_ptr->increment_received_flits(ejected_flit->get_vnet());
+        uint64_t current_time = m_net_ptr->getEventQueue()->get_current_time();
+        uint64_t latency = current_time - ejected_flit->get_creation_time();
+        m_net_ptr->increment_flit_network_latency(latency, ejected_flit->get_vnet());
+        
+        if (ejected_flit->get_type() == TAIL_ || ejected_flit->get_type() == HEAD_TAIL_) {
+             m_net_ptr->increment_received_packets(ejected_flit->get_vnet());
+             m_net_ptr->increment_packet_network_latency(latency, ejected_flit->get_vnet());
+        }
+        
         m_traffic_generator->receive_flit(ejected_flit);
     }
 
@@ -103,6 +113,11 @@ void NetworkInterface::wakeup()
         bool success = flit_inj(injected_flit);
         if (!success) {
             m_traffic_generator->requeue_flit(injected_flit);
+        } else {
+            m_net_ptr->increment_injected_flits(injected_flit->get_vnet());
+            if (injected_flit->get_type() == HEAD_ || injected_flit->get_type() == HEAD_TAIL_) {
+                m_net_ptr->increment_injected_packets(injected_flit->get_vnet());
+            }
         }
     }
 
@@ -149,6 +164,11 @@ bool NetworkInterface::flit_inj(flit* flt)
     int vnet = flt->get_vnet();
     int vc = m_vnet_to_vc_map[vnet];
     uint64_t current_time = m_net_ptr->getEventQueue()->get_current_time();
+
+    if (flt->get_trace()) {
+        std::cout << "TRACE: Packet " << flt->getPacketID() << " (Flit " << flt->get_id() << ") INJECTED at NI " << m_id 
+                  << " (" << m_x << "," << m_y << "," << m_z << ") at time " << current_time << std::endl;
+    }
 
     if (flt->get_type() == HEAD_ || flt->get_type() == HEAD_TAIL_) {
         assert(vc == -1);
@@ -227,6 +247,12 @@ flit* NetworkInterface::flit_eject()
         uint64_t current_time = m_net_ptr->getEventQueue()->get_current_time();
         if (inNetLink->isReady(current_time)) {
             flit* flt = inNetLink->consumeLink();
+
+            if (flt->get_trace()) {
+                std::cout << "TRACE: Packet " << flt->getPacketID() << " (Flit " << flt->get_id() << ") EJECTED at NI " << m_id 
+                          << " (" << m_x << "," << m_y << "," << m_z << ") at time " << current_time << std::endl;
+            }
+
             Credit* c = new Credit(flt->get_vc(),
                                  flt->get_type() == TAIL_ ||
                                  flt->get_type() == HEAD_TAIL_,

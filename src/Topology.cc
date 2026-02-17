@@ -5,8 +5,8 @@
 
 namespace garnet {
 
-Topology::Topology(GarnetNetwork* net, int num_rows, int num_cols)
-    : m_net(net), m_rows(num_rows), m_cols(num_cols), m_link_id_counter(0)
+Topology::Topology(GarnetNetwork* net, int num_rows, int num_cols, int num_depth)
+    : m_net(net), m_rows(num_rows), m_cols(num_cols), m_depth(num_depth), m_link_id_counter(0)
 {
     // These could be passed in or read from net params
     m_num_vns = 2; // Default
@@ -22,10 +22,10 @@ Topology::~Topology()
     for (auto p : m_credit_links) delete p;
 }
 
-Topology* Topology::create(std::string name, GarnetNetwork* net, int rows, int cols)
+Topology* Topology::create(std::string name, GarnetNetwork* net, int rows, int cols, int depth)
 {
     if (name == "Mesh_XY") {
-        return new MeshTopology(net, rows, cols);
+        return new MeshTopology(net, rows, cols, depth);
     }
     
     // Check if it is a config file
@@ -54,22 +54,13 @@ Topology* Topology::create(std::string name, GarnetNetwork* net, int rows, int c
         }
 
         // Construct path to conf_generator.py
-        // Assumes directory structure: 
-        //   [Exe Dir]
-        //      |-- garnet_standalone (binary)
-        //      |-- python/
-        //            |-- conf_generator.py
-        
-        // The binary is in 'garnet_standalone/' usually. 
-        // If we run from root: ./garnet_standalone/garnet_standalone
-        // Exe path is .../garnet_standalone
-        // Python is .../garnet_standalone/python/conf_generator.py
-        
         std::string script_path = exe_path + "/python/conf_generator.py";
         
+        // If it's a 3D mesh, we might want to pass depth
         std::string command = "python3 " + script_path + " --topology " + name + 
                               " --rows " + std::to_string(rows) + 
-                              " --cols " + std::to_string(cols);
+                              " --cols " + std::to_string(cols) +
+                              " --num-cpus " + std::to_string(rows * cols * depth);
         
         std::cout << "Compiling Python topology..." << std::endl;
         int ret = system(command.c_str());
@@ -82,7 +73,7 @@ Topology* Topology::create(std::string name, GarnetNetwork* net, int rows, int c
 
     // Future: Add "Mesh_3D", "Torus", etc. here
     std::cerr << "Unknown topology: " << name << ". Defaulting to Mesh_XY." << std::endl;
-    return new MeshTopology(net, rows, cols);
+    return new MeshTopology(net, rows, cols, depth);
 }
 
 void Topology::connectRouters(int src, int dest, int link_id_base, 
@@ -169,18 +160,29 @@ void MeshTopology::build()
     
     // 1. Create Routers and NIs
     for (int i = 0; i < num_routers; ++i) {
+        int x = i % m_cols;
+        int y = i / m_cols;
+        int z = 0;
+
         // Router
         Router::Params router_p;
         router_p.id = i;
+        router_p.x = x;
+        router_p.y = y;
+        router_p.z = z;
         router_p.virtual_networks = m_num_vns;
         router_p.vcs_per_vnet = m_vcs_per_vnet;
         router_p.network_ptr = m_net;
         router_p.latency = 1;
         m_routers.push_back(new Router(router_p));
+        m_net->registerRouter(m_routers.back());
 
         // Network Interface
         NetworkInterface::Params ni_p;
         ni_p.id = i;
+        ni_p.x = x;
+        ni_p.y = y;
+        ni_p.z = z;
         ni_p.virtual_networks = m_num_vns;
         ni_p.vcs_per_vnet = m_vcs_per_vnet;
         ni_p.deadlock_threshold = 50000;
@@ -189,9 +191,8 @@ void MeshTopology::build()
         m_net->registerNI(m_nis.back());
 
         // Traffic Generator (Attached to NI)
-        // Note: Using default params for now, can be parameterized later
         SimpleTrafficGenerator* tg = new SimpleTrafficGenerator(
-            i, num_routers, 0.0, m_net, m_nis.back() // 0.0 rate, main.cc will set active
+            i, num_routers, 0.0, m_net, m_nis.back()
         );
         m_tgs.push_back(tg);
         m_nis.back()->setTrafficGenerator(tg);
@@ -205,35 +206,58 @@ void MeshTopology::build()
     }
 
     // 3. Connect Routers (Mesh Links)
-    // Loop over rows and cols
-    for (int col = 0; col < m_cols; col++) {
-        for (int row = 0; row < m_rows; row++) {
+    for (int row = 0; row < m_rows; row++) {
+        for (int col = 0; col < m_cols; col++) {
             int curr = row * m_cols + col;
 
-            // South Neighbor (row + 1)
-            if (row < m_rows - 1) {
-                int south = (row + 1) * m_cols + col;
-                
-                // Curr -> South
-                connectRouters(curr, south, m_link_id_counter, "South", "North");
-                m_link_id_counter += 2;
-                
-                // South -> Curr
-                connectRouters(south, curr, m_link_id_counter, "North", "South");
+            // East
+            if (col < m_cols - 1) {
+                int east = row * m_cols + (col + 1);
+                connectRouters(curr, east, m_link_id_counter, "East", "West");
                 m_link_id_counter += 2;
             }
 
-            // East Neighbor (col + 1)
-            if (col < m_cols - 1) {
-                int east = row * m_cols + (col + 1);
-                
-                // Curr -> East
-                connectRouters(curr, east, m_link_id_counter, "East", "West");
+            // West
+            if (col > 0) {
+                int west = row * m_cols + (col - 1);
+                connectRouters(curr, west, m_link_id_counter, "West", "East");
                 m_link_id_counter += 2;
+            }
 
-                // East -> Curr
-                connectRouters(east, curr, m_link_id_counter, "West", "East");
+            // North
+            if (row > 0) {
+                int north = (row - 1) * m_cols + col;
+                connectRouters(curr, north, m_link_id_counter, "North", "South");
                 m_link_id_counter += 2;
+            }
+
+            // South
+            if (row < m_rows - 1) {
+                int south = (row + 1) * m_cols + col;
+                connectRouters(curr, south, m_link_id_counter, "South", "North");
+                m_link_id_counter += 2;
+            }
+        }
+    }
+
+    // 4. Populate Routing Tables (Shortest Path / XY)
+    for (auto router : m_routers) {
+        int my_x = router->get_x();
+        int my_y = router->get_y();
+
+        for (int dest_ni = 0; dest_ni < num_routers; dest_ni++) {
+            int dx = dest_ni % m_cols;
+            int dy = dest_ni / m_cols;
+
+            std::string dir = "Local";
+            if (dx > my_x) dir = "East";
+            else if (dx < my_x) dir = "West";
+            else if (dy > my_y) dir = "South";
+            else if (dy < my_y) dir = "North";
+
+            int port = router->getOutportIndex(dir);
+            if (port != -1) {
+                router->addRouteForPort(port, dest_ni);
             }
         }
     }

@@ -33,10 +33,11 @@ class SimpleTrafficGenerator;
 
 struct GarnetNetworkInterfaceParams {
     int id;
+    int x, y, z;
     int virtual_networks;
     int vcs_per_vnet;
     int deadlock_threshold;
-    GarnetNetwork* net_ptr;
+    GarnetNetwork *net_ptr;
 };
 
 class NetworkInterface : public Consumer
@@ -48,34 +49,36 @@ class NetworkInterface : public Consumer
 
     void addInPort(NetworkLink *in_link, CreditLink *credit_link);
     void addOutPort(NetworkLink *out_link, CreditLink *credit_link,
-        SwitchID router_id, uint32_t consumerVcs);
+                    SwitchID router_id, uint32_t consumerVcs);
 
     void init(); // Added init method
     void wakeup();
 
     // New interface for traffic generators
-    bool flit_inj(flit* flt);
-    flit* flit_eject();
+    bool flit_inj(flit *flt);
+    flit *flit_eject();
 
     // Method to attach the traffic generator
-    void setTrafficGenerator(SimpleTrafficGenerator* tg);
+    void setTrafficGenerator(SimpleTrafficGenerator *tg);
 
-    void print(std::ostream& out) const;
+    void print(std::ostream &out) const;
     int get_vnet(int vc);
     NodeID get_id() const { return m_id; }
-    void scheduleEvent(uint64_t time) override;
 
-    // The following methods are removed for the standalone version
-    // bool functionalRead(Packet *pkt, WriteMask &mask);
-    // uint32_t functionalWrite(Packet *);
+    int get_x() const { return m_x; }
+    int get_y() const { return m_y; }
+    int get_z() const { return m_z; }
+
+    void scheduleEvent(uint64_t time) override;
 
     void scheduleFlit(flit *t_flit);
 
     int get_router_id(int vnet)
     {
         OutputPort *oPort = getOutportForVnet(vnet);
-        assert(oPort);
-        return oPort->routerID();
+        if (oPort)
+            return oPort->routerID();
+        return -1;
     }
 
   private:
@@ -243,6 +246,7 @@ class NetworkInterface : public Consumer
   private:
     GarnetNetwork *m_net_ptr;
     const NodeID m_id;
+    int m_x, m_y, m_z;
     const int m_virtual_networks;
     int m_vc_per_vnet;
     std::vector<int> m_vc_allocator;

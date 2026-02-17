@@ -59,12 +59,6 @@ class CrossbarSwitch : public GarnetSimObject
         switchBuffers[inport].insert(t_flit);
     }
 
-    // The following methods are removed for the standalone version
-    // inline double get_crossbar_activity() { return 0; }
-    // bool functionalRead(Packet *pkt, WriteMask &mask);
-    // uint32_t functionalWrite(Packet *pkt);
-    // void resetStats();
-
   private:
     Router *m_router;
     int m_num_vcs;

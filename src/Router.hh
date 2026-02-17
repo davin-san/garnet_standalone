@@ -57,10 +57,11 @@ class SwitchAllocator;
 
 struct GarnetRouterParams {
     int id;
+    int x, y, z;
     int virtual_networks;
     int vcs_per_vnet;
     uint64_t latency;
-    GarnetNetwork* network_ptr;
+    GarnetNetwork *network_ptr;
 };
 
 class Router : public Consumer
@@ -72,27 +73,31 @@ class Router : public Consumer
     ~Router();
 
     void wakeup();
-    void print(std::ostream& out) const {};
+    void print(std::ostream &out) const {};
 
     void init();
     void addInPort(PortDirection inport_dirn, NetworkLink *link,
                    CreditLink *credit_link);
     void addOutPort(PortDirection outport_dirn, NetworkLink *link,
-                    std::vector<NetDest>& routing_table_entry,
+                    std::vector<NetDest> &routing_table_entry,
                     int link_weight, CreditLink *credit_link,
                     uint32_t consumerVcs);
 
     void scheduleEvent(uint64_t time) override;
 
-    uint64_t get_pipe_stages(){ return m_latency; }
-    uint32_t get_num_vcs()       { return m_num_vcs; }
-    uint32_t get_num_vnets()     { return m_virtual_networks; }
-    uint32_t get_vc_per_vnet()   { return m_vc_per_vnet; }
-    int get_num_inports()   { return m_input_unit.size(); }
-    int get_num_outports()  { return m_output_unit.size(); }
-    int get_id()            { return m_id; }
+    uint64_t get_pipe_stages() { return m_latency; }
+    uint32_t get_num_vcs() { return m_num_vcs; }
+    uint32_t get_num_vnets() { return m_virtual_networks; }
+    uint32_t get_vc_per_vnet() { return m_vc_per_vnet; }
+    int get_num_inports() { return m_input_unit.size(); }
+    int get_num_outports() { return m_output_unit.size(); }
+    int get_id() { return m_id; }
 
-    GarnetNetwork* get_net_ptr()                    { return m_network_ptr; }
+    int get_x() const { return m_x; }
+    int get_y() const { return m_y; }
+    int get_z() const { return m_z; }
+
+    GarnetNetwork *get_net_ptr() { return m_network_ptr; }
 
     InputUnit*
     getInputUnit(unsigned port)
@@ -111,6 +116,8 @@ class Router : public Consumer
     PortDirection getOutportDirection(int outport);
     PortDirection getInportDirection(int inport);
 
+    int getOutportIndex(PortDirection dir);
+
     int route_compute(RouteInfo route, int inport, PortDirection direction);
     void grant_switch(int inport, flit *t_flit);
 
@@ -118,19 +125,14 @@ class Router : public Consumer
 
     std::string getPortDirectionName(PortDirection direction);
 
-    // The following methods are removed for the standalone version
-    // void printFaultVector(std::ostream& out);
-    // void printAggregateFaultProbability(std::ostream& out);
-    // void regStats();
-    // void collateStats();
-    // void resetStats();
-    // bool get_fault_vector(...)
-    // bool get_aggregate_fault_probability(...)
-    // bool functionalRead(Packet *pkt, WriteMask &mask);
-    // uint32_t functionalWrite(Packet *);
+    bool get_fault_vector(int temperature, float fault_vector[]);
+    bool get_aggregate_fault_probability(int temperature, float *aggregate_fault_prob);
+    void printFaultVector(std::ostream& out);
+    void printAggregateFaultProbability(std::ostream& out);
 
   private:
     int m_id;
+    int m_x, m_y, m_z;
     uint64_t m_latency;
     uint32_t m_virtual_networks, m_vc_per_vnet, m_num_vcs;
     GarnetNetwork *m_network_ptr;

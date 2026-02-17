@@ -83,11 +83,6 @@ class NetworkLink : public GarnetSimObject
     inline flit* peekLink() { return linkBuffer.peekTopFlit(); }
     inline flit* consumeLink() { return linkBuffer.getTopFlit(); }
 
-    // The following methods are removed for the standalone version
-    // bool functionalRead(Packet *pkt, WriteMask &mask);
-    // uint32_t functionalWrite(Packet *);
-    // void resetStats();
-
     std::vector<int> mVnets;
     uint32_t bitWidth;
 

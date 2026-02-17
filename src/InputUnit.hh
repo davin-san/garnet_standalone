@@ -144,13 +144,6 @@ class InputUnit : public GarnetSimObject
         m_credit_link = credit_link;
     }
 
-    // The following methods are removed for the standalone version
-    // double get_buf_read_activity(unsigned int vnet) const;
-    // double get_buf_write_activity(unsigned int vnet) const;
-    // bool functionalRead(Packet *pkt, WriteMask &mask);
-    // uint32_t functionalWrite(Packet *pkt);
-    // void resetStats();
-
   private:
     Router *m_router;
     int m_id;

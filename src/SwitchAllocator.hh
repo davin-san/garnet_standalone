@@ -60,20 +60,6 @@ class SwitchAllocator : public GarnetSimObject
     bool send_allowed(int inport, int invc, int outport, int outvc);
     int vc_allocate(int outport, int inport, int invc);
 
-    // The following methods are removed for the standalone version
-    // inline double
-    // get_input_arbiter_activity()
-    // {
-    //     return m_input_arbiter_activity;
-    // }
-    // inline double
-    // get_output_arbiter_activity()
-    // {
-    //     return m_output_arbiter_activity;
-    // }
-
-    // void resetStats();
-
   private:
     int m_num_inports, m_num_outports;
     int m_num_vcs, m_vc_per_vnet;

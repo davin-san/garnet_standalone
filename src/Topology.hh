@@ -14,7 +14,7 @@ namespace garnet {
 
 class Topology {
 public:
-    Topology(GarnetNetwork* net, int num_rows, int num_cols);
+    Topology(GarnetNetwork* net, int num_rows, int num_cols, int num_depth);
     virtual ~Topology();
 
     // The main method to build the network
@@ -27,7 +27,7 @@ public:
     const std::vector<NetworkLink*>& getLinks() const { return m_links; }
 
     // Factory method
-    static Topology* create(std::string name, GarnetNetwork* net, int rows, int cols);
+    static Topology* create(std::string name, GarnetNetwork* net, int rows, int cols, int depth);
 
 protected:
     // Helper to connect two routers
@@ -41,6 +41,7 @@ protected:
     GarnetNetwork* m_net;
     int m_rows;
     int m_cols;
+    int m_depth;
     int m_num_vns;
     int m_vcs_per_vnet;
 
@@ -57,8 +58,8 @@ protected:
 
 class MeshTopology : public Topology {
 public:
-    MeshTopology(GarnetNetwork* net, int rows, int cols) 
-        : Topology(net, rows, cols) {}
+    MeshTopology(GarnetNetwork* net, int rows, int cols, int depth) 
+        : Topology(net, rows, cols, depth) {}
     
     void build() override;
 };

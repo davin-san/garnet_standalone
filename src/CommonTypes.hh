@@ -32,11 +32,48 @@
 #define __GARNET_COMMON_TYPES_HH__
 
 #include <string>
+#include <vector>
+#include <algorithm>
+#include <iostream>
 
 namespace garnet
 {
 
+// Forward declaration
 class NetDest;
+
+// NetDest definition using vector for maximum portability
+class NetDest
+{
+  public:
+    NetDest() {}
+    
+    void add(int dest_id) {
+        if (std::find(m_destinations.begin(), m_destinations.end(), dest_id) == m_destinations.end()) {
+            m_destinations.push_back(dest_id);
+        }
+    }
+    
+    bool intersectionIsNotEmpty(const NetDest& other) const {
+        for (int id : m_destinations) {
+            for (int other_id : other.m_destinations) {
+                if (id == other_id) return true;
+            }
+        }
+        return false;
+    }
+    
+    void clear() { m_destinations.clear(); }
+
+    void print() const {
+        std::cout << "{";
+        for (int id : m_destinations) std::cout << id << " ";
+        std::cout << "}";
+    }
+
+  private:
+    std::vector<int> m_destinations;
+};
 
 // All common enums and typedefs go here
 
@@ -53,8 +90,6 @@ enum link_type { EXT_IN_, EXT_OUT_, INT_, NUM_LINK_TYPES_ };
 enum RoutingAlgorithm { TABLE_ = 0, XY_ = 1, CUSTOM_ = 2,
                         NUM_ROUTING_ALGORITHM_};
 
-typedef std::string PortDirection;
-
 struct RouteInfo
 {
     RouteInfo()
@@ -64,7 +99,7 @@ struct RouteInfo
 
     // destination format for table-based routing
     int vnet;
-    NetDest* net_dest;
+    NetDest net_dest;
 
     // src and dest format for topology-specific routing
     int src_ni;

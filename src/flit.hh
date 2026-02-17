@@ -48,13 +48,13 @@ class flit
     flit(int packet_id, int id, int vc, int vnet, RouteInfo route, int size,
          void* msg_ptr, int MsgSize, uint32_t bWidth, uint64_t curTime);
 
-    virtual ~flit() {
-    }
+    virtual ~flit();
 
     int get_outport() {return m_outport; }
     int get_size() { return m_size; }
     uint64_t get_enqueue_time() { return m_enqueue_time; }
     uint64_t get_dequeue_time() { return m_dequeue_time; }
+    uint64_t get_creation_time() { return m_creation_time; }
     int getPacketID() { return m_packet_id; }
     int get_id() { return m_id; }
     uint64_t get_time() { return m_time; }
@@ -74,8 +74,14 @@ class flit
     void set_dequeue_time(uint64_t time) { m_dequeue_time = time; }
     void set_enqueue_time(uint64_t time) { m_enqueue_time = time; }
 
+    void set_trace(bool trace) { m_trace = trace; }
+    bool get_trace() const { return m_trace; }
+
     void increment_hops() { m_route.hops_traversed++; }
     virtual void print(std::ostream& out) const;
+
+    virtual flit* serialize(int ser_id, int parts, uint32_t bWidth);
+    virtual flit* deserialize(int des_id, int num_flits, uint32_t bWidth);
 
     bool
     is_stage(flit_stage stage, uint64_t time)
@@ -102,12 +108,6 @@ class flit
         }
     }
 
-    // The following methods are removed for the standalone version
-    // bool functionalRead(Packet *pkt, WriteMask &mask);
-    // bool functionalWrite(Packet *pkt);
-    // virtual flit* serialize(int ser_id, int parts, uint32_t bWidth);
-    // virtual flit* deserialize(int des_id, int num_flits, uint32_t bWidth);
-
     uint32_t m_width;
     int msgSize;
   protected:
@@ -119,10 +119,12 @@ class flit
     int m_size;
     uint64_t m_enqueue_time, m_dequeue_time;
     uint64_t m_time;
+    uint64_t m_creation_time;
     flit_type m_type;
     void* m_msg_ptr;
     int m_outport;
     uint64_t src_delay;
+    bool m_trace = false;
     std::pair<flit_stage, uint64_t> m_stage;
 };
 

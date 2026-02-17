@@ -7,8 +7,12 @@
 namespace garnet {
 
 FileTopology::FileTopology(GarnetNetwork* net, std::string filename)
-    : Topology(net, 0, 0), m_filename(filename) 
+
+    : Topology(net, 0, 0, 1), m_filename(filename)
+
 {
+
+
 }
 
 void FileTopology::build() {
@@ -35,19 +39,34 @@ void FileTopology::build() {
         if (first == "NumRouters") {
             ss >> num_routers;
             for (int i = 0; i < num_routers; ++i) {
+                std::getline(fin, line);
+                std::stringstream rss(line);
+                int id, x, y, z;
+                rss >> id >> x >> y >> z;
                 Router::Params p;
-                p.id = i;
+                p.id = id;
+                p.x = x;
+                p.y = y;
+                p.z = z;
                 p.virtual_networks = m_num_vns;
                 p.vcs_per_vnet = m_vcs_per_vnet;
                 p.network_ptr = m_net;
                 p.latency = 1;
                 m_routers.push_back(new Router(p));
+                m_net->registerRouter(m_routers.back());
             }
         } else if (first == "NumNIs") {
             ss >> num_nis;
             for (int i = 0; i < num_nis; ++i) {
+                std::getline(fin, line);
+                std::stringstream nss(line);
+                int id, x, y, z;
+                nss >> id >> x >> y >> z;
                 NetworkInterface::Params p;
-                p.id = i;
+                p.id = id;
+                p.x = x;
+                p.y = y;
+                p.z = z;
                 p.virtual_networks = m_num_vns;
                 p.vcs_per_vnet = m_vcs_per_vnet;
                 p.deadlock_threshold = 50000;
@@ -56,7 +75,7 @@ void FileTopology::build() {
                 m_net->registerNI(m_nis.back());
 
                 SimpleTrafficGenerator* tg = new SimpleTrafficGenerator(
-                    i, num_nis, 0.0, m_net, m_nis.back()
+                    id, num_nis, 0.0, m_net, m_nis.back()
                 );
                 m_tgs.push_back(tg);
                 m_nis.back()->setTrafficGenerator(tg);

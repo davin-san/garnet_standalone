@@ -22,5 +22,3 @@ obj/%.o: src/%.cc
 
 clean:
 	rm -rf obj $(TARGET)
-
-# Add back debugging and compare latencies

@@ -60,9 +60,6 @@ OutputUnit::~OutputUnit()
     // Clean up any flits left in the output buffer
     while (!outBuffer.isEmpty()) {
         flit* fl = outBuffer.getTopFlit();
-        if (fl->get_type() == TAIL_ || fl->get_type() == HEAD_TAIL_) {
-             delete fl->get_route().net_dest;
-        }
         delete fl;
     }
 }
@@ -87,7 +84,9 @@ bool
 OutputUnit::has_credit(int out_vc)
 {
     uint64_t current_time = m_router->get_net_ptr()->getEventQueue()->get_current_time();
-    assert(outVcState[out_vc].isInState(ACTIVE_, current_time));
+    if (!outVcState[out_vc].isInState(ACTIVE_, current_time)) {
+        return false;
+    }
     return outVcState[out_vc].has_credit();
 }
 
@@ -169,21 +168,14 @@ OutputUnit::set_credit_link(CreditLink *credit_link)
 void
 OutputUnit::insert_flit(flit *t_flit)
 {
+    if (t_flit->get_trace()) {
+        uint64_t current_time = m_router->get_net_ptr()->getEventQueue()->get_current_time();
+        std::cout << "TRACE: Packet " << t_flit->getPacketID() << " (Flit " << t_flit->get_id() << ") DEPARTING from Router " << m_router->get_id() 
+                  << " (" << m_router->get_x() << "," << m_router->get_y() << "," << m_router->get_z() << ") via port " << m_direction 
+                  << " at time " << current_time << std::endl;
+    }
     outBuffer.insert(t_flit);
     m_out_link->scheduleEvent(1);
 }
-
-// The following methods are removed for the standalone version
-// bool
-// OutputUnit::functionalRead(Packet *pkt, WriteMask &mask)
-// {
-//     return outBuffer.functionalRead(pkt, mask);
-// }
-
-// uint32_t
-// OutputUnit::functionalWrite(Packet *pkt)
-// {
-//     return outBuffer.functionalWrite(pkt);
-// }
 
 } // namespace garnet

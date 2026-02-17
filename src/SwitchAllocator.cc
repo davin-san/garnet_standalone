@@ -290,24 +290,24 @@ SwitchAllocator::send_allowed(int inport, int invc, int outport, int outvc)
 
 
     // protocol ordering check
-    // if ((m_router->get_net_ptr())->isVNetOrdered(vnet)) {
-    //     auto input_unit = m_router->getInputUnit(inport);
+    if ((m_router->get_net_ptr())->isVNetOrdered(vnet)) {
+        auto input_unit = m_router->getInputUnit(inport);
 
-    //     // enqueue time of this flit
-    //     uint64_t t_enqueue_time = input_unit->get_enqueue_time(invc);
+        // enqueue time of this flit
+        uint64_t t_enqueue_time = input_unit->get_enqueue_time(invc);
 
-    //     // check if any other flit is ready for SA and for same output port
-    //     // and was enqueued before this flit
-    //     int vc_base = vnet*m_vc_per_vnet;
-    //     for (int vc_offset = 0; vc_offset < m_vc_per_vnet; vc_offset++) {
-    //         int temp_vc = vc_base + vc_offset;
-    //         if (input_unit->need_stage(temp_vc, SA_, m_router->get_net_ptr()->getEventQueue()->get_current_time()) &&
-    //            (input_unit->get_outport(temp_vc) == outport) &&
-    //            (input_unit->get_enqueue_time(temp_vc) < t_enqueue_time)) {
-    //             return false;
-    //         }
-    //     }
-    // }
+        // check if any other flit is ready for SA and for same output port
+        // and was enqueued before this flit
+        int vc_base = vnet*m_vc_per_vnet;
+        for (int vc_offset = 0; vc_offset < m_vc_per_vnet; vc_offset++) {
+            int temp_vc = vc_base + vc_offset;
+            if (input_unit->need_stage(temp_vc, SA_, m_router->get_net_ptr()->getEventQueue()->get_current_time()) &&
+               (input_unit->get_outport(temp_vc) == outport) &&
+               (input_unit->get_enqueue_time(temp_vc) < t_enqueue_time)) {
+                return false;
+            }
+        }
+    }
 
     return true;
 }
@@ -331,16 +331,16 @@ SwitchAllocator::vc_allocate(int outport, int inport, int invc)
 void
 SwitchAllocator::check_for_wakeup()
 {
-    // uint64_t nextCycle = m_router->get_net_ptr()->getEventQueue()->get_current_time() + 1;
+    uint64_t nextCycle = m_router->get_net_ptr()->getEventQueue()->get_current_time() + 1;
 
-    // for (int i = 0; i < m_num_inports; i++) {
-    //     for (int j = 0; j < m_num_vcs; j++) {
-    //         if (m_router->getInputUnit(i)->need_stage(j, SA_, nextCycle)) {
-    //             m_router->get_net_ptr()->getEventQueue()->schedule(m_router, 1);
-    //             return;
-    //         }
-    //     }
-    // }
+    for (int i = 0; i < m_num_inports; i++) {
+        for (int j = 0; j < m_num_vcs; j++) {
+            if (m_router->getInputUnit(i)->need_stage(j, SA_, nextCycle)) {
+                m_router->get_net_ptr()->getEventQueue()->schedule(m_router, 1);
+                return;
+            }
+        }
+    }
 }
 
 int
@@ -359,13 +359,5 @@ SwitchAllocator::clear_request_vector()
 {
     std::fill(m_port_requests.begin(), m_port_requests.end(), -1);
 }
-
-// The following methods are removed for the standalone version
-// void
-// SwitchAllocator::resetStats()
-// {
-//     m_input_arbiter_activity = 0;
-//     m_output_arbiter_activity = 0;
-// }
 
 } // namespace garnet

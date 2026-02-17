@@ -61,6 +61,12 @@ class RoutingUnit
     // get output port from routing table
     int  lookupRoutingTable(int vnet, const NetDest& net_dest);
 
+    int getOutportIndex(PortDirection dir) {
+        if (m_outports_dirn2idx.find(dir) != m_outports_dirn2idx.end())
+            return m_outports_dirn2idx[dir];
+        return -1;
+    }
+
     // Topology-specific direction based routing
     void addInDirection(PortDirection inport_dirn, int inport);
     void addOutDirection(PortDirection outport_dirn, int outport);

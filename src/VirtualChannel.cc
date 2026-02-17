@@ -46,9 +46,6 @@ VirtualChannel::~VirtualChannel()
 {
     while (!inputBuffer.isEmpty()) {
         flit* fl = inputBuffer.getTopFlit();
-        if (fl->get_type() == TAIL_ || fl->get_type() == HEAD_TAIL_) {
-             delete fl->get_route().net_dest;
-        }
         delete fl;
     }
 }
@@ -82,19 +79,6 @@ VirtualChannel::need_stage(flit_stage stage, uint64_t time)
     }
     return false;
 }
-
-// The following methods are removed for the standalone version
-// bool
-// VirtualChannel::functionalRead(Packet *pkt, WriteMask &mask)
-// {
-//     return inputBuffer.functionalRead(pkt, mask);
-// }
-
-// uint32_t
-// VirtualChannel::functionalWrite(Packet *pkt)
-// {
-//     return inputBuffer.functionalWrite(pkt);
-// }
 
 const flitBuffer&
 VirtualChannel::getInputBuffer() const

@@ -8,9 +8,11 @@ import heapq
 current_dir = os.path.dirname(os.path.abspath(__file__))
 gem5_root = os.path.abspath(os.path.join(current_dir, "../../"))
 configs_dir = os.path.join(gem5_root, "configs")
+topologies_dir = os.path.join(configs_dir, "topologies")
 
 sys.path.insert(0, current_dir)
 sys.path.insert(0, configs_dir)
+sys.path.insert(0, topologies_dir)
 
 # Import m5 mocks
 import m5
@@ -26,6 +28,7 @@ class MockNetwork:
 class MockOptions:
     def __init__(self, rows, cols, mem_size="4GB"):
         self.mesh_rows = rows
+        self.mesh_cols = cols
         self.num_cpus = rows * cols
         self.mem_size = mem_size
         self.link_latency = 1
@@ -37,22 +40,23 @@ class MockController:
         self.type = type
         self.id = id
 
-def generate_conf(topology_name, rows, cols):
+def generate_conf(topology_name, rows, cols, num_cpus=None):
     output_file = "topology.conf"
     
     # 1. Load Topology Class
     if topology_name.endswith('.py'):
         # Normalize path and extract filename/directory
         topo_abs_path = os.path.abspath(topology_name)
-        file_dir = os.path.dirname(topo_abs_path)
         module_name = os.path.basename(topo_abs_path).replace('.py', '')
         
-        sys.path.insert(0, file_dir)
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(module_name, topo_abs_path)
+        topo_module = importlib.util.module_from_spec(spec)
         try:
-            topo_module = importlib.import_module(module_name)
+            spec.loader.exec_module(topo_module)
             topo_class = getattr(topo_module, module_name)
         except Exception as e:
-            print(f"Error importing {topology_name} (as {module_name} in {file_dir}): {e}")
+            print(f"Error loading topology from {topo_abs_path}: {e}")
             sys.exit(1)
     else:
         # Assume it's a topology name within configs/topologies/
@@ -67,6 +71,9 @@ def generate_conf(topology_name, rows, cols):
 
     # 2. Build Mock Network
     options = MockOptions(rows, cols)
+    if num_cpus:
+        options.num_cpus = num_cpus
+
     controllers = [MockController(i) for i in range(options.num_cpus)]
     topo = topo_class(controllers)
     network = MockNetwork()
@@ -82,10 +89,6 @@ def generate_conf(topology_name, rows, cols):
     for i, link in enumerate(network.ext_links):
         r_id = link.int_node.router_id
         ni_id = link.ext_node.id
-        # In our standalone, the port index for this NI is its index in the NI list?
-        # No, it's the order it was added to the router.
-        # We need to know the port index assigned during router->addInPort/addOutPort.
-        # Simple heuristic: use the order in ext_links and int_links.
         pass
 
     # Actually, we need to replicate the EXACT port indexing used in C++ Topology.cc/FileTopology.cc
@@ -139,13 +142,32 @@ def generate_conf(topology_name, rows, cols):
                         distances[v] = dist + 1
                         heapq.heappush(pq, (distances[v], v, first_hop))
         
-        # print(f"DEBUG: Router {start_r} Routing Table: {routing_tables[start_r]}")
-
     # 4. Write Output
     with open(output_file, 'w') as f:
         print(f"# Topology: {topology_name}", file=f)
+        
+        # Calculate dimensions for coordinates
+        x_dim = cols
+        y_dim = rows
+        z_dim = len(network.routers) // (x_dim * y_dim)
+        if z_dim == 0: z_dim = 1
+
         print(f"NumRouters {len(network.routers)}", file=f)
+        for r in network.routers:
+            rid = r.router_id
+            rx = rid % x_dim
+            ry = (rid // x_dim) % y_dim
+            rz = rid // (x_dim * y_dim)
+            print(f"{rid} {rx} {ry} {rz}", file=f)
+
         print(f"NumNIs {len(controllers)}", file=f)
+        for c in controllers:
+            cid = c.id
+            cx = cid % x_dim
+            cy = (cid // x_dim) % y_dim
+            cz = cid // (x_dim * y_dim)
+            print(f"{cid} {cx} {cy} {cz}", file=f)
+
         print(f"NumExtLinks {len(network.ext_links)}", file=f)
         print(f"NumIntLinks {len(network.int_links)}", file=f)
         
@@ -155,7 +177,7 @@ def generate_conf(topology_name, rows, cols):
             
         print("\nIntLinks", file=f)
         for link in network.int_links:
-            lat = 0 # Match gem5 network latency reporting (Link cycles often excluded or merged)
+            lat = 0 # Match gem5 network latency reporting
             weight = link.weight if link.weight is not None else 1
             src_p = link.src_outport if link.src_outport is not None else "None"
             dst_p = link.dst_inport if link.dst_inport is not None else "None"
@@ -171,5 +193,6 @@ if __name__ == "__main__":
     parser.add_argument("--topology", required=True)
     parser.add_argument("--rows", type=int, default=2)
     parser.add_argument("--cols", type=int, default=2)
+    parser.add_argument("--num-cpus", type=int, default=None)
     args = parser.parse_args()
-    generate_conf(args.topology, args.rows, args.cols)
+    generate_conf(args.topology, args.rows, args.cols, args.num_cpus)

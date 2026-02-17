@@ -79,32 +79,4 @@ flitBuffer::setMaxSize(int maximum)
     max_size = maximum;
 }
 
-// The following methods are removed for the standalone version
-// bool
-// flitBuffer::functionalRead(Packet *pkt, WriteMask &mask)
-// {
-//     bool read = false;
-//     for (unsigned int i = 0; i < m_buffer.size(); ++i) {
-//         if (m_buffer[i]->functionalRead(pkt, mask)) {
-//             read = true;
-//         }
-//     }
-
-//     return read;
-// }
-
-// uint32_t
-// flitBuffer::functionalWrite(Packet *pkt)
-// {
-//     uint32_t num_functional_writes = 0;
-
-//     for (unsigned int i = 0; i < m_buffer.size(); ++i) {
-//         if (m_buffer[i]->functionalWrite(pkt)) {
-//             num_functional_writes++;
-//         }
-//     }
-
-//     return num_functional_writes;
-// }
-
 } // namespace garnet

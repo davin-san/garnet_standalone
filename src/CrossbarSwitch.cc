@@ -52,9 +52,6 @@ CrossbarSwitch::~CrossbarSwitch()
     for (auto& buf : switchBuffers) {
         while (!buf.isEmpty()) {
             flit* fl = buf.getTopFlit();
-            if (fl->get_type() == TAIL_ || fl->get_type() == HEAD_TAIL_) {
-                 delete fl->get_route().net_dest;
-            }
             delete fl;
         }
     }
@@ -97,34 +94,5 @@ CrossbarSwitch::wakeup()
         }
     }
 }
-
-// The following methods are removed for the standalone version
-// bool
-// CrossbarSwitch::functionalRead(Packet *pkt, WriteMask &mask)
-// {
-//     bool read = false;
-//     for (auto& switch_buffer : switchBuffers) {
-//         if (switch_buffer.functionalRead(pkt, mask))
-//             read = true;
-//    }
-//    return read;
-// }
-
-// uint32_t
-// CrossbarSwitch::functionalWrite(Packet *pkt)
-// {
-//    uint32_t num_functional_writes = 0;
-
-//    for (auto& switch_buffer : switchBuffers) {
-//        num_functional_writes += switch_buffer.functionalWrite(pkt);
-//    }
-
-//    return num_functional_writes;
-// }
-
-// void
-// CrossbarSwitch::resetStats()
-// {
-// }
 
 } // namespace garnet

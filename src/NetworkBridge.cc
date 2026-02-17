@@ -13,8 +13,8 @@
  * and/or other materials provided with the distribution.
  *
  * 3. Neither the name of the copyright holder nor the names of its
- * contributors may be used to endorse or promote products derived from this
- * software without specific prior written permission.
+ * contributors may be used to endorse or promote products derived from
+ * this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -34,43 +34,35 @@
 
 #include <cmath>
 #include "GarnetNetwork.hh"
+#include "Consumer.hh"
 
 namespace garnet
 {
 
 NetworkBridge::NetworkBridge(const Params &p)
-    :CreditLink(CreditLink::Params())
+    :CreditLink(p)
 {
-    // enCdc = true;
-    // enSerDes = true;
-    // mType = p.vtype;
+    enCdc = true;
+    enSerDes = true;
+    mType = 0; // Default
 
-    // cdcLatency = p.cdc_latency;
-    // serDesLatency = p.serdes_latency;
-    // lastScheduledAt = 0;
+    cdcLatency = 1;
+    serDesLatency = 1;
+    lastScheduledAt = 0;
 
-    // nLink = p.link;
-    // if (mType == 1) { // enums::LINK_OBJECT
-    //     nLink->setLinkConsumer(this);
-    //     setSourceQueue(nLink->getBuffer());
-    // } else if (mType == 2) { // enums::OBJECT_LINK
-    //     nLink->setSourceQueue(&linkBuffer);
-    //     setLinkConsumer(nLink);
-    // } else {
-    //     // CDC type must be set
-    // }
+    nLink = nullptr; 
 }
 
 void
 NetworkBridge::setVcsPerVnet(uint32_t consumerVcs)
 {
     NetworkLink::setVcsPerVnet(consumerVcs);
-    lenBuffer.resize(consumerVcs * m_virt_nets);
-    sizeSent.resize(consumerVcs * m_virt_nets);
-    flitsSent.resize(consumerVcs * m_virt_nets);
+    lenBuffer.resize(consumerVcs * m_virt_nets, 0);
+    sizeSent.resize(consumerVcs * m_virt_nets, 0);
+    flitsSent.resize(consumerVcs * m_virt_nets, 0);
     extraCredit.resize(consumerVcs * m_virt_nets);
 
-    nLink->setVcsPerVnet(consumerVcs);
+    if (nLink) nLink->setVcsPerVnet(consumerVcs);
 }
 
 void
@@ -88,20 +80,19 @@ NetworkBridge::~NetworkBridge()
 void
 NetworkBridge::scheduleFlit(flit *t_flit, uint64_t latency)
 {
-    // uint64_t totLatency = latency;
+    uint64_t totLatency = latency;
 
-    // if (enCdc) {
-    //     // Add the CDC latency
-    //     totLatency = latency + cdcLatency;
-    // }
+    if (enCdc) {
+        // Add the CDC latency
+        totLatency = latency + cdcLatency;
+    }
 
-    // uint64_t sendTime = link_consumer->clockEdge(totLatency);
-    // uint64_t nextAvailTick = lastScheduledAt + link_consumer->cyclesToTicks(1);
-    // sendTime = std::max(nextAvailTick, sendTime);
-    // t_flit->set_time(sendTime);
-    // lastScheduledAt = sendTime;
-    // linkBuffer.insert(t_flit);
-    // link_consumer->scheduleEventAbsolute(sendTime);
+    uint64_t sendTime = m_net_ptr->getEventQueue()->get_current_time() + totLatency;
+    sendTime = std::max(lastScheduledAt + 1, sendTime);
+    t_flit->set_time(sendTime);
+    lastScheduledAt = sendTime;
+    linkBuffer.insert(t_flit);
+    link_consumer->scheduleEvent(totLatency);
 }
 
 void
@@ -135,7 +126,7 @@ NetworkBridge::flitisizeAndSend(flit *t_flit)
             int flitPossible = 0;
             if (t_flit->get_type() == CREDIT_) {
                 lenBuffer[vc]++;
-                assert(extraCredit[vc].front());
+                assert(!extraCredit[vc].empty());
                 if (lenBuffer[vc] == extraCredit[vc].front()) {
                     flitPossible = 1;
                     extraCredit[vc].pop();
@@ -166,10 +157,10 @@ NetworkBridge::flitisizeAndSend(flit *t_flit)
                 }
             }
 
-            flit *fl = NULL;
+            flit *fl = nullptr;
             if (flitPossible) {
-                // fl = t_flit->deserialize(lenBuffer[vc], num_flits,
-                //     target_width);
+                fl = t_flit->deserialize(lenBuffer[vc], num_flits,
+                    target_width);
             }
 
             // Inform the credit serializer about the number
@@ -188,11 +179,12 @@ NetworkBridge::flitisizeAndSend(flit *t_flit)
         } else {
             // Serialize
             int flitPossible = 0;
+            int vc = t_flit->get_vc();
             if (t_flit->get_type() == CREDIT_) {
                 // We store the deserialization ratio and then
                 // access it when serializing credits in the
                 // oppposite direction.
-                assert(extraCredit[vc].front());
+                assert(!extraCredit[vc].empty());
                 flitPossible = extraCredit[vc].front();
                 extraCredit[vc].pop();
             } else if (t_flit->get_type() == HEAD_ ||
@@ -210,17 +202,17 @@ NetworkBridge::flitisizeAndSend(flit *t_flit)
                 sizeSent[vc] = 0;
                 flitsSent[vc] = 0;
             }
-            assert(flitPossible > 0);
+            // assert(flitPossible > 0);
 
             // Schedule all the flits
             // num_flits could be zero for credits
             for (int i = 0; i < flitPossible; i++) {
                 // Ignore neutralized credits
-                // flit *fl = t_flit->serialize(i, flitPossible, target_width);
-                // scheduleFlit(fl, serDesLatency);
+                flit *fl = t_flit->serialize(i, flitPossible, target_width);
+                scheduleFlit(fl, serDesLatency);
             }
 
-            if (t_flit->get_type() != CREDIT_) {
+            if (t_flit->get_type() != CREDIT_ && flitPossible > 0) {
                 coBridge->neutralize(vc, flitPossible);
             }
             // Delete this flit, new flit is sent in any case

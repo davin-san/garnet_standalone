@@ -44,11 +44,13 @@ flit::flit(int packet_id, int id, int  vc, int vnet, RouteInfo route, int size,
     m_enqueue_time = curTime;
     m_dequeue_time = curTime;
     m_time = curTime;
+    m_creation_time = curTime;
     m_packet_id = packet_id;
     m_id = id;
     m_vnet = vnet;
     m_vc = vc;
     m_route = route;
+    m_trace = false;
     m_stage.first = I_;
     m_stage.second = curTime;
     m_width = bWidth;
@@ -64,6 +66,42 @@ flit::flit(int packet_id, int id, int  vc, int vnet, RouteInfo route, int size,
         m_type = TAIL_;
     else
         m_type = BODY_;
+}
+
+flit *
+flit::serialize(int ser_id, int parts, uint32_t bWidth)
+{
+    assert(m_width > bWidth);
+
+    int ratio = (int)std::ceil((float)m_width / bWidth);
+    int new_id = (m_id*ratio) + ser_id;
+    int new_size = (int)std::ceil((float)msgSize / (float)bWidth);
+    assert(new_id < new_size);
+
+    flit *fl = new flit(m_packet_id, new_id, m_vc, m_vnet, m_route,
+                    new_size, m_msg_ptr, msgSize, bWidth, m_time);
+    fl->set_enqueue_time(m_enqueue_time);
+    fl->set_src_delay(src_delay);
+    return fl;
+}
+
+flit *
+flit::deserialize(int des_id, int num_flits, uint32_t bWidth)
+{
+    int ratio = (int)std::ceil((float)bWidth / (float)m_width);
+    int new_id = ((int)std::ceil((float)(m_id+1) / (float)ratio)) - 1;
+    int new_size = (int)std::ceil((float)msgSize / (float)bWidth);
+    assert(new_id < new_size);
+
+    flit *fl = new flit(m_packet_id, new_id, m_vc, m_vnet, m_route,
+                    new_size, m_msg_ptr, msgSize, bWidth, m_time);
+    fl->set_enqueue_time(m_enqueue_time);
+    fl->set_src_delay(src_delay);
+    return fl;
+}
+
+flit::~flit()
+{
 }
 
 // The following methods are removed for the standalone version
@@ -118,18 +156,5 @@ flit::print(std::ostream& out) const
     out << "Width=" << m_width<< " ";
     out << "]";
 }
-
-// The following methods are removed for the standalone version
-// bool
-// flit::functionalRead(Packet *pkt, WriteMask &mask)
-// {
-//     return false;
-// }
-
-// bool
-// flit::functionalWrite(Packet *pkt)
-// {
-//     return false;
-// }
 
 } // namespace garnet

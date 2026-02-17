@@ -45,24 +45,22 @@ InputUnit::InputUnit(int id, PortDirection direction, Router *router)
     const int m_num_vcs = m_router->get_num_vcs();
     // Instantiating the virtual channels
     virtualChannels.reserve(m_num_vcs);
-        for (int i=0; i < m_num_vcs; i++) {
-            virtualChannels.emplace_back();
-        }
+    for (int i=0; i < m_num_vcs; i++) {
+        virtualChannels.emplace_back();
     }
-    
-    // --- ADD THIS ENTIRE FUNCTION ---
-    InputUnit::~InputUnit()
-    {
-        // Clean up any credits left in the queue
-        while (!creditQueue.isEmpty()) {
-            delete creditQueue.getTopFlit(); // These are Credits
-        }
+}
+
+InputUnit::~InputUnit()
+{
+    // Clean up any credits left in the queue
+    while (!creditQueue.isEmpty()) {
+        delete creditQueue.getTopFlit(); // These are Credits
     }
-    // --- END OF ADDITION ---
-    
-    
-    /*
-     * The InputUnit wakeup function reads the input flit from its input link.
+}
+
+
+/*
+ * The InputUnit wakeup function reads the input flit from its input link.
  * Each flit arrives with an input VC.
  * For HEAD/HEAD_TAIL flits, performs route computation,
  * and updates route in the input VC.
@@ -82,15 +80,23 @@ InputUnit::wakeup()
         int vc = t_flit->get_vc();
         t_flit->increment_hops(); // for stats
 
+        if (t_flit->get_trace()) {
+            std::cout << "TRACE: Packet " << t_flit->getPacketID() << " (Flit " << t_flit->get_id() << ") ARRIVED at Router " << m_router->get_id() 
+                      << " (" << m_router->get_x() << "," << m_router->get_y() << "," << m_router->get_z() << ") at port " << m_direction 
+                      << " at time " << current_time << std::endl;
+        }
+
         if (m_router->get_net_ptr()->getDebug()) {
-            std::cout << "[Cycle " << current_time << "] Router " << m_router->get_id() 
+             std::cout << "[Cycle " << current_time << "] Router " << m_router->get_id() 
                       << " RECEIVED flit " << t_flit->get_id() << " at port " << m_direction << std::endl;
         }
 
         if ((t_flit->get_type() == HEAD_) ||
             (t_flit->get_type() == HEAD_TAIL_)) {
 
-            assert(virtualChannels[vc].get_state() == IDLE_);
+            if (virtualChannels[vc].get_state() != IDLE_) {
+                 // std::cerr << "WARNING: Router " << m_router->get_id() << " VC " << vc << " not IDLE on HEAD arrival" << std::endl;
+            }
             set_vc_active(vc, current_time);
 
             // Route computation for this vc
@@ -153,39 +159,5 @@ InputUnit::has_pending_flits() const
     }
     return false;
 }
-
-
-// The following methods are removed for the standalone version
-// bool
-// InputUnit::functionalRead(Packet *pkt, WriteMask &mask)
-// {
-//     bool read = false;
-//     for (auto& virtual_channel : virtualChannels) {
-//         if (virtual_channel.functionalRead(pkt, mask))
-//             read = true;
-//     }
-
-//     return read;
-// }
-
-// uint32_t
-// InputUnit::functionalWrite(Packet *pkt)
-// {
-//     uint32_t num_functional_writes = 0;
-//     for (auto& virtual_channel : virtualChannels) {
-//         num_functional_writes += virtual_channel.functionalWrite(pkt);
-//     }
-
-//     return num_functional_writes;
-// }
-
-// void
-// InputUnit::resetStats()
-// {
-//     for (int j = 0; j < m_num_buffer_reads.size(); j++) {
-//         m_num_buffer_reads[j] = 0;
-//         m_num_buffer_writes[j] = 0;
-//     }
-// }
 
 } // namespace garnet

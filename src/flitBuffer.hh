@@ -77,10 +77,6 @@ class flitBuffer
         m_buffer.push_back(flt);
     }
 
-    // The following methods are removed for the standalone version
-    // bool functionalRead(Packet *pkt, WriteMask &mask);
-    // uint32_t functionalWrite(Packet *pkt);
-
   private:
     std::deque<flit *> m_buffer;
     int max_size;

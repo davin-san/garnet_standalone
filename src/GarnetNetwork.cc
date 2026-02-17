@@ -40,6 +40,7 @@
 #include "NetworkInterface.hh"
 #include "NetworkLink.hh"
 #include "Router.hh"
+#include "FaultModel.hh"
 
 
 namespace garnet
@@ -55,6 +56,7 @@ GarnetNetwork::GarnetNetwork(const Params &p)
 {
     m_num_rows = p.num_rows;
     m_num_cols = p.num_cols;
+    m_num_depth = p.num_depth;
     m_ni_flit_size = p.ni_flit_size;
     m_max_vcs_per_vnet = 0;
     m_buffers_per_data_vc = p.buffers_per_data_vc;
@@ -65,84 +67,37 @@ GarnetNetwork::GarnetNetwork(const Params &p)
 
     m_enable_fault_model = p.enable_fault_model;
     if (m_enable_fault_model)
-        fault_model = nullptr; // new FaultModel(p.fault_model);
+        fault_model = new FaultModel();
+    else
+        fault_model = nullptr;
+    
+    m_garnetStats.reset();
+}
 
-    // m_vnet_type.resize(m_virtual_networks);
-
-    // for (int i = 0 ; i < m_virtual_networks ; i++) {
-    //     if (m_vnet_type_names[i] == "response")
-    //         m_vnet_type[i] = DATA_VNET_; // carries data (and ctrl) packets
-    //     else
-    //         m_vnet_type[i] = CTRL_VNET_; // carries only ctrl packets
-    // }
-
-    // record the routers
-    // for (std::vector<BasicRouter*>::const_iterator i =  p.routers.begin();
-    //      i != p.routers.end(); ++i) {
-    //     Router* router = safe_cast<Router*>(*i);
-    //     m_routers.push_back(router);
-
-    //     // initialize the router's network pointers
-    //     router->init_net_ptr(this);
-    // }
-
-    // // record the network interfaces
-    // for (std::vector<ClockedObject*>::const_iterator i = p.netifs.begin();
-    //      i != p.netifs.end(); ++i) {
-    //     NetworkInterface *ni = safe_cast<NetworkInterface *>(*i);
-    //     m_nis.push_back(ni);
-    //     ni->init_net_ptr(this);
-    // }
-
-    // Print Garnet version
-    // inform("Garnet version %s\n", garnetVersion);
+GarnetNetwork::~GarnetNetwork()
+{
+    if (fault_model)
+        delete fault_model;
 }
 
 void
 GarnetNetwork::init()
 {
-    // This will be handled by the configuration system
-}
-
-/*
- * This function creates a link from the Network Interface (NI)
- * into the Network.
- * It creates a Network Link from the NI to a Router and a Credit Link from
- * the Router to the NI
-*/
-
-void
-GarnetNetwork::makeExtInLink(NodeID global_src, SwitchID dest,
-                             std::vector<NetDest>& routing_table_entry)
-{
-    // Will be re-implemented
-}
-
-/*
- * This function creates a link from the Network to a NI.
- * It creates a Network Link from a Router to the NI and
- * a Credit Link from NI to the Router
-*/
-
-void
-GarnetNetwork::makeExtOutLink(SwitchID src, NodeID global_dest,
-                              std::vector<NetDest>& routing_table_entry)
-{
-    // Will be re-implemented
-}
-
-/*
- * This function creates an internal network link between two routers.
- * It adds both the network link and an opposite credit link.
-*/
-
-void
-GarnetNetwork::makeInternalLink(SwitchID src, SwitchID dest,
-                                std::vector<NetDest>& routing_table_entry,
-                                PortDirection src_outport_dirn,
-                                PortDirection dst_inport_dirn)
-{
-    // Will be re-implemented
+    if (m_enable_fault_model) {
+        for (std::vector<Router*>::const_iterator i = m_routers.begin();
+             i != m_routers.end(); ++i) {
+            Router* router = *i;
+            int router_id =
+                fault_model->declare_router(router->get_num_inports(),
+                                            router->get_num_outports(),
+                                            router->get_vc_per_vnet(),
+                                            getBuffersPerDataVC(),
+                                            getBuffersPerCtrlVC());
+            assert(router_id == router->get_id());
+            // router->printAggregateFaultProbability(std::cout);
+            // router->printFaultVector(std::cout);
+        }
+    }
 }
 
 // Total routers in the network
@@ -163,15 +118,10 @@ GarnetNetwork::get_router_id(int global_ni, int vnet)
 void
 GarnetNetwork::print(std::ostream& out) const
 {
-    out << "[GarnetNetwork]";
+    out << "[GarnetNetwork]\n";
+    m_garnetStats.print(out);
 }
 
-// The following methods are removed for the standalone version
-// void GarnetNetwork::regStats() {}
-// void GarnetNetwork::collateStats() {}
-// void GarnetNetwork::resetStats() {}
-// void GarnetNetwork::update_traffic_distribution(RouteInfo route) {}
-// bool GarnetNetwork::functionalRead(Packet *pkt, WriteMask &mask) { return false; }
-// uint32_t GarnetNetwork::functionalWrite(Packet *pkt) { return 0; }
+void GarnetNetwork::update_traffic_distribution(RouteInfo route) {}
 
 } // namespace garnet
