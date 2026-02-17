@@ -23,7 +23,7 @@ make
 
 ### Common Options:
 - `--topology <name>`: Path to a Python topology file or a built-in name (e.g., `Mesh_XY`).
-- `--rows <int>`, `--cols <int>`: Dimensions for mesh topologies.
+- `--rows <int>`, `--cols <int>`, `--depth <int>`: Dimensions for mesh topologies.
 - `--routing <0|1>`: `0` for Table-based, `1` for Algorithmic XY(Z).
 - `--rate <float>`: Injection rate (flits/cycle/node).
 - `--packet-size <int>`: Number of flits per packet.
