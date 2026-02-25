@@ -39,6 +39,7 @@ public:
         m_latency_per_vnet.resize(num_vnets, 0);
         m_dest_dist = std::uniform_int_distribution<int>(0, num_nis - 1);
         m_vnet_dist = std::uniform_int_distribution<int>(0, num_vnets - 1);
+        m_last_injection_cycle = (uint64_t)-1;
     }
 
     ~SimpleTrafficGenerator()
@@ -59,28 +60,35 @@ public:
 
     flit* send_flit()
     {
-        m_injection_attempts++; 
+        uint64_t current_time = m_net_ptr->getEventQueue()->get_current_time();
+
+        // Only attempt to generate a NEW packet if we haven't done so this cycle.
+        if (current_time > m_last_injection_cycle || m_last_injection_cycle == (uint64_t)-1) {
+            m_last_injection_cycle = current_time;
+            m_injection_attempts++; 
+
+            if (m_active && m_id == 0 && m_flit_queue.empty()) {
+                int dest_id = m_num_nis - 1; // Send to last NI
+                generate_packet(dest_id, 0, current_time, m_trace_packet);
+                m_injected_packets++;
+            }
+            else if (!m_active && m_injection_rate > 0.0) {
+                if (m_dist(m_rng) <= m_injection_rate) {
+                    int dest_id = m_dest_dist(m_rng);
+                    if (dest_id == m_id) dest_id = (dest_id + 1) % m_num_nis;
+                    int vnet = m_vnet_dist(m_rng);
+                    generate_packet(dest_id, vnet, current_time);
+                    m_injected_packets++;
+                }
+            }
+        }
+        
+        // Return a stalled flit if there is one (regardless of cycle, 
+        // as it was already "generated" in a previous cycle).
         if (m_stalled_flit) {
             flit* fl = m_stalled_flit;
             m_stalled_flit = nullptr;
             return fl;
-        }
-        
-        uint64_t current_time = m_net_ptr->getEventQueue()->get_current_time();
-
-        if (m_active && m_id == 0 && m_flit_queue.empty()) {
-            int dest_id = m_num_nis - 1; // Send to last NI
-            generate_packet(dest_id, 0, current_time, m_trace_packet);
-            m_injected_packets++;
-        }
-        else if (!m_active && m_injection_rate > 0.0) {
-            if (m_dist(m_rng) <= m_injection_rate) {
-                int dest_id = m_dest_dist(m_rng);
-                if (dest_id == m_id) dest_id = (dest_id + 1) % m_num_nis;
-                int vnet = m_vnet_dist(m_rng);
-                generate_packet(dest_id, vnet, current_time);
-                m_injected_packets++;
-            }
         }
 
         if (!m_flit_queue.empty()) {
@@ -162,6 +170,7 @@ private:
     flit* m_stalled_flit;
     bool m_active; 
     bool m_trace_packet = false;
+    uint64_t m_last_injection_cycle;
 
     uint64_t m_total_latency;
     uint64_t m_received_packets;
