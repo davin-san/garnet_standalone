@@ -12,6 +12,17 @@
 
 namespace garnet {
 
+// Parameters for topology creation (chiplet-specific params ignored for Mesh_XY).
+struct TopologyParams {
+    int num_chiplets        = 1;
+    int intra_rows          = 4;
+    int intra_cols          = 4;
+    std::string inter_topology = "ring"; // ring, mesh, fc, bus
+    int inter_latency       = 1;
+    int inter_width         = 128;       // bits (informational; not modeled in flit sim)
+    int vcs_per_vnet        = 4;
+};
+
 class Topology {
 public:
     Topology(GarnetNetwork* net, int num_rows, int num_cols, int num_depth);
@@ -26,12 +37,20 @@ public:
     const std::vector<SimpleTrafficGenerator*>& getTGs() const { return m_tgs; }
     const std::vector<NetworkLink*>& getLinks() const { return m_links; }
 
-    // Factory method
-    static Topology* create(std::string name, GarnetNetwork* net, int rows, int cols, int depth);
+    // Factory method (accepts optional chiplet params)
+    static Topology* create(std::string name, GarnetNetwork* net,
+                            int rows, int cols, int depth,
+                            const TopologyParams& params = TopologyParams());
+
+    // Override default vnet count before calling build().
+    void set_num_vnets(int n) { m_num_vns = n; }
+
+    // Override VCs per vnet before calling build().
+    void set_vcs_per_vnet(int n) { m_vcs_per_vnet = n; }
 
 protected:
-    // Helper to connect two routers
-    void connectRouters(int src_id, int dest_id, int link_id_base, 
+    // Helper to connect two routers (unidirectional)
+    void connectRouters(int src_id, int dest_id, int link_id_base,
                         std::string src_out_dir, std::string dest_in_dir,
                         int latency = 1);
 
@@ -51,17 +70,25 @@ protected:
     std::vector<SimpleTrafficGenerator*> m_tgs;
     std::vector<NetworkLink*> m_links;
     std::vector<CreditLink*> m_credit_links;
-    
+
     // Link ID counter to ensure uniqueness
     int m_link_id_counter;
 };
 
 class MeshTopology : public Topology {
 public:
-    MeshTopology(GarnetNetwork* net, int rows, int cols, int depth) 
+    MeshTopology(GarnetNetwork* net, int rows, int cols, int depth)
         : Topology(net, rows, cols, depth) {}
-    
+
     void build() override;
+};
+
+class ChipletTopology : public Topology {
+public:
+    ChipletTopology(GarnetNetwork* net, const TopologyParams& p);
+    void build() override;
+private:
+    TopologyParams m_params;
 };
 
 } // namespace garnet

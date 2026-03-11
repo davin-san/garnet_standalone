@@ -13,13 +13,14 @@
 #include "NetworkInterface.hh"
 #include "CommonTypes.hh"
 #include "NetDest.hh"
+#include "TrafficGenerator.hh"
 
 namespace garnet
 {
 
 class NetworkInterface;
 
-class SimpleTrafficGenerator
+class SimpleTrafficGenerator : public TrafficGenerator
 {
 public:
     SimpleTrafficGenerator(int id, int num_nis, double injection_rate,
@@ -52,13 +53,13 @@ public:
         }
     }
 
-    void set_injection_rate(double rate) { m_injection_rate = rate; }
-    void set_packet_size(int size) { m_packet_size = size; }
-    void set_active(bool active) { m_active = active; }
-    void set_seed(int seed) { m_rng.seed(seed + m_id); }
-    void set_trace_packet(bool trace) { m_trace_packet = trace; }
+    void set_injection_rate(double rate) override { m_injection_rate = rate; }
+    void set_packet_size(int size)       override { m_packet_size = size; }
+    void set_active(bool active)         override { m_active = active; }
+    void set_seed(int seed)              override { m_rng.seed(seed + m_id); }
+    void set_trace_packet(bool trace)    override { m_trace_packet = trace; }
 
-    flit* send_flit()
+    flit* send_flit() override
     {
         uint64_t current_time = m_net_ptr->getEventQueue()->get_current_time();
 
@@ -100,9 +101,9 @@ public:
         return nullptr;
     }
 
-    void requeue_flit(flit* flt) { m_stalled_flit = flt; }
+    void requeue_flit(flit* flt) override { m_stalled_flit = flt; }
 
-    void receive_flit(flit* flt) {
+    void receive_flit(flit* flt) override {
         uint64_t current_time = m_net_ptr->getEventQueue()->get_current_time();
         if (flt->get_type() == TAIL_ || flt->get_type() == HEAD_TAIL_) {
             uint64_t latency = current_time - flt->get_enqueue_time();
@@ -117,17 +118,16 @@ public:
         delete flt; 
     }
 
-    uint64_t get_total_latency() { return m_total_latency; }
-    uint64_t get_received_packets() { return m_received_packets; }
-    uint64_t get_injected_packets() { return m_injected_packets; }
-    uint64_t get_injection_attempts() { return m_injection_attempts; }
-    
-    uint64_t get_received_vnet(int vnet) { return m_received_per_vnet[vnet]; }
-    uint64_t get_latency_vnet(int vnet) { return m_latency_per_vnet[vnet]; }
+    uint64_t get_total_latency()      override { return m_total_latency; }
+    uint64_t get_received_packets()   override { return m_received_packets; }
+    uint64_t get_injected_packets()   override { return m_injected_packets; }
+    uint64_t get_injection_attempts() override { return m_injection_attempts; }
 
-    // Dummy for NI compatibility
-    void schedule_next_injection(uint64_t t) {}
-    uint64_t get_next_injection_time() const { return 0; }
+    uint64_t get_received_vnet(int vnet) override { return m_received_per_vnet[vnet]; }
+    uint64_t get_latency_vnet(int vnet)  override { return m_latency_per_vnet[vnet]; }
+
+    void schedule_next_injection(uint64_t) override {}
+    uint64_t get_next_injection_time() const override { return 0; }
 
 private:
     void generate_packet(int dest_id, int vnet, uint64_t time, bool trace = false) {

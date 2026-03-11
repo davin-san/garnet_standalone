@@ -171,7 +171,9 @@ RoutingUnit::outportComputeXY(RouteInfo route,
         outport_dirn = "Local";
     }
 
-    return m_outports_dirn2idx[outport_dirn];
+    auto it = m_outports_dirn2idx.find(outport_dirn);
+    if (it == m_outports_dirn2idx.end()) return -1;
+    return it->second;
 }
 
 int

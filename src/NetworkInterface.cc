@@ -45,7 +45,7 @@ NetworkInterface::~NetworkInterface()
     }
 }
 
-void NetworkInterface::setTrafficGenerator(SimpleTrafficGenerator* tg) { m_traffic_generator = tg; }
+void NetworkInterface::setTrafficGenerator(TrafficGenerator* tg) { m_traffic_generator = tg; }
 
 void NetworkInterface::init() { /* NIC initialization if needed */ }
 

@@ -1,0 +1,100 @@
+{
+  "num_cpus": 16,
+  "num_dirs": 4,
+  "mesh_rows": 4,
+  "mesh_cols": 4,
+  "mem_channels": 4,
+  "num_phases": 3,
+
+  "phases": [
+    {
+      "phase_index": 0,
+      "total_packets": 80000,
+      "total_flits": 200000,
+      "flits_per_packet": 2.5,
+      "data_pct": 37.5,
+      "ctrl_pct": 62.5,
+      "sim_ticks": 200000000,
+      "network_cycles": 2000,
+      "lambda": 0.033333,
+      "avg_packet_latency": 35.0,
+
+      "vnet_packets": {"0": 40000, "1": 28000, "2": 12000},
+
+      "per_router_injection": {
+        "0":  0.065, "1":  0.072, "2":  0.058, "3":  0.070,
+        "4":  0.061, "5":  0.068, "6":  0.055, "7":  0.075,
+        "8":  0.062, "9":  0.059, "10": 0.071, "11": 0.066,
+        "12": 0.057, "13": 0.063, "14": 0.069, "15": 0.060
+      },
+
+      "dir_fractions": {
+        "0": 0.28, "1": 0.22, "2": 0.30, "3": 0.20
+      }
+    },
+    {
+      "phase_index": 1,
+      "total_packets": 120000,
+      "total_flits": 360000,
+      "flits_per_packet": 3.0,
+      "data_pct": 50.0,
+      "ctrl_pct": 50.0,
+      "sim_ticks": 300000000,
+      "network_cycles": 3000,
+      "lambda": 0.050000,
+      "avg_packet_latency": 40.0,
+
+      "vnet_packets": {"0": 60000, "1": 40000, "2": 20000},
+
+      "per_router_injection": {
+        "0":  0.062, "1":  0.068, "2":  0.061, "3":  0.073,
+        "4":  0.063, "5":  0.070, "6":  0.058, "7":  0.072,
+        "8":  0.064, "9":  0.060, "10": 0.069, "11": 0.067,
+        "12": 0.059, "13": 0.065, "14": 0.071, "15": 0.058
+      },
+
+      "dir_fractions": {
+        "0": 0.25, "1": 0.25, "2": 0.25, "3": 0.25
+      }
+    },
+    {
+      "phase_index": 2,
+      "total_packets": 40000,
+      "total_flits": 80000,
+      "flits_per_packet": 2.0,
+      "data_pct": 20.0,
+      "ctrl_pct": 80.0,
+      "sim_ticks": 100000000,
+      "network_cycles": 1000,
+      "lambda": 0.020000,
+      "avg_packet_latency": 28.0,
+
+      "vnet_packets": {"0": 25000, "1": 12000, "2": 3000},
+
+      "per_router_injection": {
+        "0":  0.060, "1":  0.065, "2":  0.062, "3":  0.068,
+        "4":  0.063, "5":  0.067, "6":  0.061, "7":  0.070,
+        "8":  0.064, "9":  0.059, "10": 0.066, "11": 0.063,
+        "12": 0.058, "13": 0.064, "14": 0.068, "15": 0.062
+      },
+
+      "dir_fractions": {
+        "0": 0.30, "1": 0.20, "2": 0.30, "3": 0.20
+      }
+    }
+  ],
+
+  "model_assumptions": {
+    "flit_width_bytes": 16,
+    "cacheline_bytes": 64,
+    "data_packet_flits": 5,
+    "ctrl_packet_flits": 1
+  },
+
+  "directory_remapping": {
+    "0": 0,
+    "1": 5,
+    "2": 10,
+    "3": 15
+  }
+}

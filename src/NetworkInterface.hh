@@ -24,6 +24,7 @@
 #include "CreditLink.hh"
 #include "flitBuffer.hh"
 #include "OutVcState.hh"
+#include "TrafficGenerator.hh"
 
 namespace garnet
 {
@@ -58,8 +59,8 @@ class NetworkInterface : public Consumer
     bool flit_inj(flit *flt);
     flit *flit_eject();
 
-    // Method to attach the traffic generator
-    void setTrafficGenerator(SimpleTrafficGenerator *tg);
+    // Attach a traffic generator (SimpleTrafficGenerator or PaceTrafficGenerator).
+    void setTrafficGenerator(TrafficGenerator *tg);
 
     void print(std::ostream &out) const;
     int get_vnet(int vc);
@@ -264,8 +265,8 @@ class NetworkInterface : public Consumer
     // --- FIX: Add state to track VC assignment per vnet ---
     std::vector<int> m_vnet_to_vc_map;
 
-    // Pointer to the traffic generator
-    SimpleTrafficGenerator* m_traffic_generator;
+    // Pointer to the traffic generator (SimpleTrafficGenerator or PaceTrafficGenerator).
+    TrafficGenerator* m_traffic_generator;
 
     void checkStallQueue();
 
