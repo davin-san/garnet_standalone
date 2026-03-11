@@ -243,6 +243,11 @@ void MeshTopology::build()
     }
 }
 
+int MeshTopology::get_diameter() const
+{
+    return (m_rows > 0 ? m_rows - 1 : 0) + (m_cols > 0 ? m_cols - 1 : 0);
+}
+
 // ============================================================
 // ChipletTopology
 // ============================================================
@@ -410,6 +415,8 @@ void ChipletTopology::build()
 
     typedef std::pair<int,int> PQEntry; // {distance, router_id}
 
+    int max_dist = 0;
+
     for (int src = 0; src < num_routers; ++src) {
         std::vector<int> dist(num_routers, INT_MAX);
         std::vector<std::string> first_hop(num_routers, "");
@@ -437,6 +444,10 @@ void ChipletTopology::build()
             }
         }
 
+        for (int d : dist) {
+            if (d != INT_MAX && d > max_dist) max_dist = d;
+        }
+
         // Populate routing table for this source router.
         for (int dest_ni = 0; dest_ni < num_routers; ++dest_ni) {
             if (dest_ni == src) {
@@ -451,6 +462,12 @@ void ChipletTopology::build()
             }
         }
     }
+    m_diameter = max_dist;
+}
+
+int ChipletTopology::get_diameter() const
+{
+    return m_diameter;
 }
 
 } // namespace garnet

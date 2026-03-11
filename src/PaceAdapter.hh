@@ -44,13 +44,15 @@ public:
     // mshr_limit : max outstanding requests per core node (default 16)
     // seed       : RNG seed (added to per-node offset for reproducibility)
     PaceAdapter(const std::string& profile_path, int mshr_limit = 16, int seed = 42,
-                const AblationConfig& ablation = AblationConfig());
+                const AblationConfig& ablation = AblationConfig(),
+                int packets_per_node = 500, double temporal_floor = 2.0);
     ~PaceAdapter();
 
     // Create a PaceTrafficGenerator for every NI in the topology and
     // attach it to the NI (replacing its existing SimpleTrafficGenerator).
     // Must be called after topo->build() and before the simulation loop.
-    void init(const std::vector<NetworkInterface*>& nis, GarnetNetwork* net);
+    void init(const std::vector<NetworkInterface*>& nis, GarnetNetwork* net,
+              int diameter = 10);
 
     // Advance phase counter.  Call once per simulation cycle, before NI wakeups.
     // Returns false when all phases are exhausted (simulation should stop).
@@ -126,11 +128,16 @@ private:
     PaceProfile    m_profile;
     int            m_current_phase;
     uint64_t       m_cycles_in_phase;
+    uint64_t       m_packets_in_current_phase;
     bool           m_done;
     int            m_mshr_limit;
     int            m_seed;
     int                m_num_routers;   // set in init(); used by no_remap
     PaceAblationConfig m_ablation;
+
+    int      m_target_packets_per_node;
+    double   m_temporal_floor;
+    int      m_diameter;
 
     std::vector<PaceTrafficGenerator*> m_tgs;
 

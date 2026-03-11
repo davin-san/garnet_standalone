@@ -3,16 +3,15 @@
 #include <iostream>
 #include <sstream>
 #include <cassert>
+#include <queue>
+#include <algorithm>
+#include <map>
 
 namespace garnet {
 
 FileTopology::FileTopology(GarnetNetwork* net, std::string filename)
-
     : Topology(net, 0, 0, 1), m_filename(filename)
-
 {
-
-
 }
 
 void FileTopology::build() {
@@ -28,6 +27,8 @@ void FileTopology::build() {
     std::string line;
     enum ParseState { HEADER, EXT_LINKS, INT_LINKS, ROUTING_TABLES };
     ParseState state = HEADER;
+
+    std::map<int, std::vector<std::pair<int, int>>> adj;
 
     while (std::getline(fin, line)) {
         if (line.empty() || line[0] == '#') continue;
@@ -102,6 +103,7 @@ void FileTopology::build() {
                 if (data_ss >> src >> dst >> lat >> weight >> src_p >> dst_p) {
                     connectRouters(src, dst, m_link_id_counter, src_p, dst_p, lat);
                     m_link_id_counter += 2;
+                    adj[src].push_back({dst, lat});
                 }
             } else if (state == ROUTING_TABLES) {
                 int r_id, dest_ni, port;
@@ -113,6 +115,43 @@ void FileTopology::build() {
     }
 
     fin.close();
+
+    // Calculate diameter using Dijkstra (since lat can be > 1)
+    int max_dist = 0;
+    for (auto const& r_start : m_routers) {
+        int src = r_start->get_id();
+        std::map<int, int> dists;
+        for (auto const& r : m_routers) dists[r->get_id()] = 1000000;
+        dists[src] = 0;
+
+        typedef std::pair<int, int> ipair;
+        std::priority_queue<ipair, std::vector<ipair>, std::greater<ipair>> pq;
+        pq.push({0, src});
+
+        while (!pq.empty()) {
+            int d = pq.top().first;
+            int u = pq.top().second;
+            pq.pop();
+
+            if (d > dists[u]) continue;
+
+            if (adj.count(u)) {
+                for (auto const& edge : adj.at(u)) {
+                    int v = edge.first;
+                    int weight = edge.second;
+                    if (dists[v] > dists[u] + weight) {
+                        dists[v] = dists[u] + weight;
+                        pq.push({dists[v], v});
+                    }
+                }
+            }
+        }
+
+        for (auto const& d : dists) {
+            if (d.second != 1000000 && d.second > max_dist) max_dist = d.second;
+        }
+    }
+    m_diameter = max_dist;
 }
 
 } // namespace garnet

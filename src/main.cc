@@ -50,6 +50,8 @@ struct SimConfig {
     int         pace_mshr_limit = 16;
     std::string pace_output = "pace_results.json";
     std::string pace_dir_routers = ""; // comma-separated gateway router IDs
+    int         pace_packets_per_node = 500;
+    double      pace_temporal_floor = 2.0;
 
     // Chiplet topology params
     int num_chiplets = 4;
@@ -88,6 +90,8 @@ void parse_args(int argc, char** argv, SimConfig& config) {
         {"pace-profile",      required_argument, 0, 'P'},
         {"pace-mshr",         required_argument, 0, 'M'},
         {"pace-output",       required_argument, 0, 'O'},
+        {"pace-packets-per-node", required_argument, 0, 2017},
+        {"pace-temporal-floor",   required_argument, 0, 2018},
         // Gem5-compatible new flags
         {"network",           required_argument, 0, 2000}, // accepted, ignored
         {"num-cpus",          required_argument, 0, 2001},
@@ -149,6 +153,8 @@ void parse_args(int argc, char** argv, SimConfig& config) {
             case 2014: config.inter_latency    = std::atoi(optarg); break;
             case 2015: config.inter_width      = std::atoi(optarg); break;
             case 2016: config.pace_dir_routers = optarg; break;
+            case 2017: config.pace_packets_per_node = std::atoi(optarg); break;
+            case 2018: config.pace_temporal_floor = std::atof(optarg); break;
 
             // Ablation flags
             case 1001: config.pace_no_per_source    = true; break;
@@ -247,7 +253,8 @@ static void run_pace(const SimConfig& config, Topology* topo,
     ablation.no_corr_response = config.pace_no_corr_response;
 
     PaceAdapter adapter(config.pace_profile, config.pace_mshr_limit, config.seed,
-                        ablation);
+                        ablation, config.pace_packets_per_node,
+                        config.pace_temporal_floor);
 
     // Override directory remapping if --pace-dir-routers was given.
     // The list "0,16,32,48" maps dir 0->router 0, dir 1->router 16, etc.
@@ -259,19 +266,17 @@ static void run_pace(const SimConfig& config, Topology* topo,
         adapter.set_directory_remapping(remap);
     }
 
-    adapter.init(topo->getNIs(), &network);
+    adapter.init(topo->getNIs(), &network, topo->get_diameter());
 
     for (auto tg : adapter.getTGs())
         tg->set_trace_packet(config.trace_packet);
 
     for (auto router : topo->getRouters()) router->init();
 
-    uint64_t total_cycles = adapter.total_network_cycles();
-    std::cout << "PACE: total simulation length = " << total_cycles << " cycles\n";
-
     EventQueue* event_queue = network.getEventQueue();
     uint64_t t = 0;
-    for (; t <= total_cycles; ++t) {
+
+    for (; t < 1000000000; ++t) { // Large limit, adapter.tick(t) handles termination
         event_queue->set_current_time(t);
         if (t > 0 && !adapter.tick(t)) break;
         for (auto ni : topo->getNIs())         ni->wakeup();

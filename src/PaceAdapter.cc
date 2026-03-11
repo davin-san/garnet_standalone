@@ -244,12 +244,15 @@ void PaceTrafficGenerator::receive_flit(flit* flt)
 
 PaceAdapter::PaceAdapter(const std::string& profile_path,
                          int mshr_limit, int seed,
-                         const AblationConfig& ablation)
-    : m_current_phase(0), m_cycles_in_phase(0), m_done(false),
-      m_mshr_limit(mshr_limit), m_seed(seed),
+                         const AblationConfig& ablation,
+                         int packets_per_node, double temporal_floor)
+    : m_current_phase(0), m_cycles_in_phase(0), m_packets_in_current_phase(0),
+      m_done(false), m_mshr_limit(mshr_limit), m_seed(seed),
       m_total_latency_sum(0), m_total_packets_received(0),
       m_total_flits_received(0),
-      m_num_routers(0), m_ablation(ablation)
+      m_num_routers(0), m_ablation(ablation),
+      m_target_packets_per_node(packets_per_node),
+      m_temporal_floor(temporal_floor), m_diameter(10)
 {
     m_profile = PaceProfile::load(profile_path);
 
@@ -378,8 +381,9 @@ PaceAdapter::~PaceAdapter()
 }
 
 void PaceAdapter::init(const std::vector<NetworkInterface*>& nis,
-                       GarnetNetwork* net)
+                       GarnetNetwork* net, int diameter)
 {
+    m_diameter = diameter;
     int num_nis = (int)nis.size();
     m_num_routers = num_nis; // NI count == router count in this topology
 
@@ -433,12 +437,19 @@ bool PaceAdapter::tick(uint64_t /*current_cycle*/)
     ++m_cycles_in_phase;
 
     const PacePhase& ph = m_profile.phases[m_current_phase];
-    // A phase with network_cycles == 0 (both network_cycles and sim_ticks were
-    // zero in the profile — degenerate) is treated as zero-duration and skipped.
-    if (ph.network_cycles == 0 || m_cycles_in_phase >= ph.network_cycles) {
-        // Advance to next phase without resetting MSHR state.
+    
+    // Convergence check
+    bool time_floor_met = m_cycles_in_phase > (uint64_t)(m_temporal_floor * m_diameter);
+    bool packet_target_met = m_packets_in_current_phase >= (uint64_t)(m_target_packets_per_node * m_num_routers);
+
+    if (time_floor_met && packet_target_met) {
+        std::cout << "PACE: phase " << m_current_phase << " converged (" 
+                  << m_cycles_in_phase << " cycles, " 
+                  << m_packets_in_current_phase << " packets)\n";
+        
         ++m_current_phase;
         m_cycles_in_phase = 0;
+        m_packets_in_current_phase = 0;
         if (m_current_phase >= (int)m_profile.phases.size()) {
             m_done = true;
             return false;
@@ -529,6 +540,7 @@ void PaceAdapter::record_packet_received(uint64_t latency, int phase_idx,
     m_latency_histogram[latency]++;
     m_total_latency_sum += latency;
     ++m_total_packets_received;
+    ++m_packets_in_current_phase;
     m_total_flits_received += (uint64_t)num_flits;
 
     if (phase_idx >= 0 && phase_idx < (int)m_phase_metrics.size()) {

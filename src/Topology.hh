@@ -37,6 +37,8 @@ public:
     const std::vector<SimpleTrafficGenerator*>& getTGs() const { return m_tgs; }
     const std::vector<NetworkLink*>& getLinks() const { return m_links; }
 
+    virtual int get_diameter() const = 0;
+
     // Factory method (accepts optional chiplet params)
     static Topology* create(std::string name, GarnetNetwork* net,
                             int rows, int cols, int depth,
@@ -81,14 +83,17 @@ public:
         : Topology(net, rows, cols, depth) {}
 
     void build() override;
+    int get_diameter() const override;
 };
 
 class ChipletTopology : public Topology {
 public:
     ChipletTopology(GarnetNetwork* net, const TopologyParams& p);
     void build() override;
+    int get_diameter() const override;
 private:
     TopologyParams m_params;
+    int m_diameter = 0;
 };
 
 } // namespace garnet
