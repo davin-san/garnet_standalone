@@ -478,19 +478,6 @@ bool PaceAdapter::tick(uint64_t /*current_cycle*/)
     // Zero-duration phases (e.g. network.cycles stat missing, lambda≈0): skip.
     bool zero_duration    = (ph.network_cycles == 0);
 
-    // Debug print every 10K cycles.
-    if (m_cycles_in_phase % 10000 == 0) {
-        std::cout << "PACE debug: phase=" << m_current_phase
-                  << " cycles=" << m_cycles_in_phase
-                  << " packets=" << m_packets_in_current_phase
-                  << " floor_met=" << (time_floor_met ? "T" : "F")
-                  << " target_met=" << (packet_target_met ? "T" : "F")
-                  << " floor_threshold=" << floor_threshold
-                  << " packet_threshold=" << packet_threshold
-                  << " net_cycles=" << ph.network_cycles
-                  << "\n";
-    }
-
     bool advance = zero_duration || cycles_exhausted ||
                    (time_floor_met && packet_target_met);
 
