@@ -51,7 +51,7 @@ struct SimConfig {
     int         pace_mshr_limit = 16;
     std::string pace_output = "pace_results.json";
     std::string pace_dir_routers = ""; // comma-separated gateway router IDs
-    int         pace_packets_per_node = 500;
+    int         pace_packets_per_node = 100;
     double      pace_temporal_floor = 2.0;
 
     // Chiplet topology params
@@ -93,6 +93,7 @@ void parse_args(int argc, char** argv, SimConfig& config) {
         {"pace-output",       required_argument, 0, 'O'},
         {"pace-packets-per-node", required_argument, 0, 2017},
         {"pace-temporal-floor",   required_argument, 0, 2018},
+        {"pace-target-packets",   required_argument, 0, 2019}, // alias
         // Gem5-compatible new flags
         {"network",           required_argument, 0, 2000}, // accepted, ignored
         {"num-cpus",          required_argument, 0, 2001},
@@ -156,6 +157,7 @@ void parse_args(int argc, char** argv, SimConfig& config) {
             case 2016: config.pace_dir_routers = optarg; break;
             case 2017: config.pace_packets_per_node = std::atoi(optarg); break;
             case 2018: config.pace_temporal_floor = std::atof(optarg); break;
+            case 2019: config.pace_packets_per_node = std::atoi(optarg); break;
 
             // Ablation flags
             case 1001: config.pace_no_per_source    = true; break;

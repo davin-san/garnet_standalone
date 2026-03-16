@@ -428,6 +428,36 @@ void PaceAdapter::init(const std::vector<NetworkInterface*>& nis,
               << m_profile.num_dirs << " dirs)\n";
     for (const auto& kv : m_profile.directory_remapping)
         std::cout << "  dir " << kv.first << " -> router " << kv.second << "\n";
+
+    // Startup convergence estimate.
+    // Per phase: max(floor_threshold, ceil(packet_threshold / total_injection_rate)).
+    // Zero-duration phases cost 1 cycle (skipped immediately).
+    uint64_t floor_thresh   = (uint64_t)(m_temporal_floor * m_diameter);
+    uint64_t packet_thresh  = (uint64_t)(m_target_packets_per_node * num_nis);
+    uint64_t total_net_cyc  = 0;
+    uint64_t est_conv_cyc   = 0;
+    for (const auto& ph : m_profile.phases) {
+        total_net_cyc += ph.network_cycles;
+        if (ph.network_cycles == 0) {
+            est_conv_cyc += 1; // skipped immediately
+        } else {
+            double total_rate = ph.lambda * num_cpus; // packets/cycle across all nodes
+            uint64_t pkts_est = (total_rate > 0.0)
+                ? (uint64_t)std::ceil((double)packet_thresh / total_rate)
+                : ph.network_cycles;
+            uint64_t phase_est = std::max(floor_thresh, pkts_est);
+            // Cap at the phase's own network_cycles (fallback termination).
+            est_conv_cyc += std::min(phase_est, ph.network_cycles);
+        }
+    }
+    est_conv_cyc += 200; // drain window
+
+    std::cout << "PACE: " << m_profile.num_phases << " phases"
+              << "  total_net_cycles=" << total_net_cyc
+              << "  estimated_convergence_cycles=" << est_conv_cyc
+              << "  (target=" << m_target_packets_per_node << " packets/node"
+              << "  floor=" << floor_thresh << " cycles"
+              << "  diameter=" << m_diameter << ")\n";
 }
 
 bool PaceAdapter::tick(uint64_t /*current_cycle*/)
@@ -620,6 +650,23 @@ void PaceAdapter::dump_results(const std::string& path,
                      ? (double)m_total_latency_sum / m_total_packets_received
                      : 0.0;
     uint64_t p99   = percentile99(m_latency_histogram);
+
+    // Profile-weighted average latency: L = sum(L_i * P_orig_i) / sum(P_orig_i).
+    // Uses original profile packet counts so high-activity phases dominate,
+    // regardless of how many packets were simulated per phase.
+    double pw_lat_num = 0.0;
+    int64_t pw_lat_den = 0;
+    for (int i = 0; i < (int)m_phase_metrics.size(); ++i) {
+        const auto& pm = m_phase_metrics[i];
+        if (pm.packets_received > 0) {
+            double ph_avg = (double)pm.total_latency / pm.packets_received;
+            int64_t p_orig = m_profile.phases[i].total_packets;
+            pw_lat_num += ph_avg * p_orig;
+            pw_lat_den += p_orig;
+        }
+    }
+    double profile_weighted_avg_lat = (pw_lat_den > 0)
+                                      ? pw_lat_num / pw_lat_den : avg_lat;
     double throughput = total_cycles > 0
                         ? (double)m_total_flits_received / total_cycles
                         : 0.0;
@@ -676,6 +723,7 @@ void PaceAdapter::dump_results(const std::string& path,
       << "    \"total_packets_received\": " << m_total_packets_received << ",\n"
       << "    \"total_flits_received\": " << m_total_flits_received << ",\n"
       << "    \"avg_latency_cycles\": " << avg_lat << ",\n"
+      << "    \"profile_weighted_avg_latency\": " << profile_weighted_avg_lat << ",\n"
       << "    \"p99_latency_cycles\": " << p99 << ",\n"
       << "    \"throughput_flits_per_cycle\": " << throughput << "\n"
       << "  },\n";
