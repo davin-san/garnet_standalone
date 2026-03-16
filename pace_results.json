@@ -1,0 +1,14 @@
+{
+  "packet_stats": {
+    "total_packets_received": 0,
+    "total_flits_received": 0,
+    "avg_latency_cycles": 0,
+    "p99_latency_cycles": 0,
+    "throughput_flits_per_cycle": 0
+  },
+  "saturation": {
+    "near_saturation": false,
+    "max_avg_mshr_occupancy": 0,
+    "saturated_nodes": []
+  }
+}

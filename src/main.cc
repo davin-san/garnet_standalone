@@ -1,4 +1,5 @@
 #include <iostream>
+#include <fstream>
 #include <vector>
 #include <cstdlib>
 #include <ctime>
@@ -238,6 +239,41 @@ static void run_standard(const SimConfig& config, Topology* topo,
     }
 
     std::cout << "Simulation finished.\n";
+
+    // Write pace_results.json for uniform mode if --pace-output is set.
+    if (!config.pace_output.empty()) {
+        double avg_lat = total_packets > 0
+                         ? (double)total_latency / total_packets : 0.0;
+        // total_flits: all packets have the same packet_size in uniform mode.
+        uint64_t total_flits = total_packets * (uint64_t)config.packet_size;
+        double throughput = config.sim_cycles > 0
+                            ? (double)total_flits / config.sim_cycles : 0.0;
+
+        std::ofstream jf(config.pace_output);
+        if (jf.is_open()) {
+            jf << "{\n"
+               << "  \"packet_stats\": {\n"
+               << "    \"total_packets_received\": " << total_packets << ",\n"
+               << "    \"total_flits_received\": " << total_flits << ",\n"
+               << "    \"avg_latency_cycles\": " << avg_lat << ",\n"
+               << "    \"p99_latency_cycles\": 0,\n"
+               << "    \"throughput_flits_per_cycle\": " << throughput << "\n"
+               << "  },\n"
+               << "  \"saturation\": {\n"
+               << "    \"near_saturation\": false,\n"
+               << "    \"max_avg_mshr_occupancy\": 0,\n"
+               << "    \"saturated_nodes\": []\n"
+               << "  }\n"
+               << "}\n";
+            jf.close();
+            std::cout << "Uniform results written to " << config.pace_output << "\n";
+            std::cout << "  avg_latency=" << avg_lat << " cycles"
+                      << "  throughput=" << throughput << " flits/cycle\n";
+        } else {
+            std::cerr << "Warning: cannot write results to "
+                      << config.pace_output << "\n";
+        }
+    }
 }
 
 // ---- PACE simulation ----

@@ -437,16 +437,48 @@ bool PaceAdapter::tick(uint64_t /*current_cycle*/)
     ++m_cycles_in_phase;
 
     const PacePhase& ph = m_profile.phases[m_current_phase];
-    
-    // Convergence check
-    bool time_floor_met = m_cycles_in_phase > (uint64_t)(m_temporal_floor * m_diameter);
-    bool packet_target_met = m_packets_in_current_phase >= (uint64_t)(m_target_packets_per_node * m_num_routers);
 
-    if (time_floor_met && packet_target_met) {
-        std::cout << "PACE: phase " << m_current_phase << " converged (" 
-                  << m_cycles_in_phase << " cycles, " 
-                  << m_packets_in_current_phase << " packets)\n";
-        
+    uint64_t floor_threshold  = (uint64_t)(m_temporal_floor * m_diameter);
+    uint64_t packet_threshold = (uint64_t)(m_target_packets_per_node * m_num_routers);
+    bool time_floor_met   = m_cycles_in_phase > floor_threshold;
+    bool packet_target_met = m_packets_in_current_phase >= packet_threshold;
+    // Fallback: phase ran its full allocated duration with no early convergence.
+    bool cycles_exhausted = (ph.network_cycles > 0 &&
+                             m_cycles_in_phase >= ph.network_cycles);
+    // Zero-duration phases (e.g. network.cycles stat missing, lambda≈0): skip.
+    bool zero_duration    = (ph.network_cycles == 0);
+
+    // Debug print every 10K cycles.
+    if (m_cycles_in_phase % 10000 == 0) {
+        std::cout << "PACE debug: phase=" << m_current_phase
+                  << " cycles=" << m_cycles_in_phase
+                  << " packets=" << m_packets_in_current_phase
+                  << " floor_met=" << (time_floor_met ? "T" : "F")
+                  << " target_met=" << (packet_target_met ? "T" : "F")
+                  << " floor_threshold=" << floor_threshold
+                  << " packet_threshold=" << packet_threshold
+                  << " net_cycles=" << ph.network_cycles
+                  << "\n";
+    }
+
+    bool advance = zero_duration || cycles_exhausted ||
+                   (time_floor_met && packet_target_met);
+
+    if (advance) {
+        if (zero_duration) {
+            std::cout << "PACE: phase " << m_current_phase
+                      << " skipped (zero-duration)\n";
+        } else if (time_floor_met && packet_target_met) {
+            std::cout << "PACE: phase " << m_current_phase << " converged early ("
+                      << m_cycles_in_phase << " / " << ph.network_cycles
+                      << " cycles, " << m_packets_in_current_phase << " packets)\n";
+        } else {
+            std::cout << "PACE: phase " << m_current_phase << " exhausted ("
+                      << m_cycles_in_phase << " / " << ph.network_cycles
+                      << " cycles, " << m_packets_in_current_phase
+                      << " / " << packet_threshold << " packets)\n";
+        }
+
         ++m_current_phase;
         m_cycles_in_phase = 0;
         m_packets_in_current_phase = 0;
