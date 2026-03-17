@@ -109,7 +109,8 @@ void Topology::connectRouters(int src, int dest, int link_id_base,
     m_routers[dest]->addInPort(dest_in_dir, link, credit_link);
 }
 
-void Topology::connectNiToRouter(int ni_id, int router_id, int link_id_base)
+void Topology::connectNiToRouter(int ni_id, int router_id, int link_id_base,
+                                 const std::string& local_dir)
 {
     // NI -> Router
     NetworkLink::Params l1_p;
@@ -129,7 +130,7 @@ void Topology::connectNiToRouter(int ni_id, int router_id, int link_id_base)
     m_credit_links.push_back(r_to_ni_credit);
 
     m_nis[ni_id]->addOutPort(ni_to_r, r_to_ni_credit, router_id, m_vcs_per_vnet);
-    m_routers[router_id]->addInPort("Local", ni_to_r, r_to_ni_credit);
+    m_routers[router_id]->addInPort(local_dir, ni_to_r, r_to_ni_credit);
 
     // Router -> NI
     NetworkLink::Params l2_p;
@@ -149,7 +150,7 @@ void Topology::connectNiToRouter(int ni_id, int router_id, int link_id_base)
     m_credit_links.push_back(ni_to_r_credit);
 
     std::vector<NetDest> routing_table_entry(m_num_vns);
-    m_routers[router_id]->addOutPort("Local", r_to_ni, routing_table_entry,
+    m_routers[router_id]->addOutPort(local_dir, r_to_ni, routing_table_entry,
                                      1, ni_to_r_credit, m_vcs_per_vnet);
     m_nis[ni_id]->addInPort(r_to_ni, ni_to_r_credit);
 }
@@ -260,33 +261,55 @@ ChipletTopology::ChipletTopology(GarnetNetwork* net, const TopologyParams& p)
 
 void ChipletTopology::build()
 {
-    int n_chiplets = m_params.num_chiplets;
-    int n_intra    = m_params.intra_rows * m_params.intra_cols;
+    int n_chiplets  = m_params.num_chiplets;
+    int n_intra     = m_params.intra_rows * m_params.intra_cols;
     int num_routers = n_chiplets * n_intra;
+
+    // CMesh support: num_cpus may be larger than num_routers (multiple NIs per router).
+    // concentration = NIs per router; 1 = standard (one NI per router).
+    int num_cpus = (m_params.num_cpus > 0) ? m_params.num_cpus : num_routers;
+    int concentration = num_cpus / num_routers;
+    if (num_cpus % num_routers != 0) {
+        std::cerr << "ChipletTopology: num_cpus (" << num_cpus
+                  << ") must be a multiple of num_routers (" << num_routers
+                  << "). Rounding down concentration.\n";
+        concentration = num_cpus / num_routers;
+        num_cpus = concentration * num_routers;
+    }
 
     // Adjacency list for Dijkstra routing.
     // adj[r] = list of {dst_router, latency_cycles, outport_direction_at_r}
     struct AdjEdge { int dst; int lat; std::string dir; };
     std::vector<std::vector<AdjEdge>> adj(num_routers);
 
-    // ---- 1. Create routers and NIs ----
-    for (int i = 0; i < num_routers; ++i) {
-        int chiplet  = i / n_intra;
-        int local_id = i % n_intra;
+    // ---- 1. Create routers ----
+    for (int r = 0; r < num_routers; ++r) {
+        int chiplet  = r / n_intra;
+        int local_id = r % n_intra;
         int lx = local_id % m_params.intra_cols;
         int ly = local_id / m_params.intra_cols;
-        // Global x places chiplets side-by-side
         int gx = chiplet * m_params.intra_cols + lx;
         int gy = ly;
 
         Router::Params rp;
-        rp.id = i; rp.x = gx; rp.y = gy; rp.z = 0;
+        rp.id = r; rp.x = gx; rp.y = gy; rp.z = 0;
         rp.virtual_networks = m_num_vns;
         rp.vcs_per_vnet     = m_vcs_per_vnet;
         rp.network_ptr      = m_net;
         rp.latency          = 1;
         m_routers.push_back(new Router(rp));
         m_net->registerRouter(m_routers.back());
+    }
+
+    // ---- 1b. Create NIs (num_cpus total; concentration per router for CMesh) ----
+    for (int i = 0; i < num_cpus; ++i) {
+        int router_id = i / concentration;
+        int chiplet   = router_id / n_intra;
+        int local_id  = router_id % n_intra;
+        int lx = local_id % m_params.intra_cols;
+        int ly = local_id / m_params.intra_cols;
+        int gx = chiplet * m_params.intra_cols + lx;
+        int gy = ly;
 
         NetworkInterface::Params np;
         np.id = i; np.x = gx; np.y = gy; np.z = 0;
@@ -298,15 +321,21 @@ void ChipletTopology::build()
         m_net->registerNI(m_nis.back());
 
         SimpleTrafficGenerator* tg = new SimpleTrafficGenerator(
-            i, num_routers, 0.0, m_net, m_nis.back());
+            i, num_cpus, 0.0, m_net, m_nis.back());
         m_tgs.push_back(tg);
         m_nis.back()->setTrafficGenerator(tg);
     }
 
     // ---- 2. NI <-> Router local links ----
+    // For concentration > 1: each router gets ports "Local_0", "Local_1", ...
+    // For concentration == 1: use "Local" (backward compatible).
     m_link_id_counter = 0;
-    for (int i = 0; i < num_routers; ++i) {
-        connectNiToRouter(i, i, m_link_id_counter);
+    for (int i = 0; i < num_cpus; ++i) {
+        int router_id = i / concentration;
+        std::string local_dir = (concentration > 1)
+                                ? "Local_" + std::to_string(i % concentration)
+                                : "Local";
+        connectNiToRouter(i, router_id, m_link_id_counter, local_dir);
         m_link_id_counter += 4;
     }
 
@@ -449,16 +478,23 @@ void ChipletTopology::build()
         }
 
         // Populate routing table for this source router.
-        for (int dest_ni = 0; dest_ni < num_routers; ++dest_ni) {
-            if (dest_ni == src) {
-                int port = m_routers[src]->getOutportIndex("Local");
+        // dest_ni runs over all num_cpus NIs; dest_router = dest_ni / concentration.
+        for (int dest_ni = 0; dest_ni < num_cpus; ++dest_ni) {
+            int dest_router = dest_ni / concentration;
+            if (dest_router == src) {
+                // Locally attached NI: route to its specific local port.
+                std::string local_dir = (concentration > 1)
+                                        ? "Local_" + std::to_string(dest_ni % concentration)
+                                        : "Local";
+                int port = m_routers[src]->getOutportIndex(local_dir);
                 if (port >= 0) m_routers[src]->addRouteForPort(port, dest_ni);
-            } else if (!first_hop[dest_ni].empty()) {
-                int port = m_routers[src]->getOutportIndex(first_hop[dest_ni]);
+            } else if (!first_hop[dest_router].empty()) {
+                int port = m_routers[src]->getOutportIndex(first_hop[dest_router]);
                 if (port >= 0) m_routers[src]->addRouteForPort(port, dest_ni);
             } else {
                 std::cerr << "ChipletTopology: WARNING: no route from router "
-                          << src << " to NI " << dest_ni << "\n";
+                          << src << " to NI " << dest_ni
+                          << " (dest_router=" << dest_router << ")\n";
             }
         }
     }

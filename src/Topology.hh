@@ -21,6 +21,9 @@ struct TopologyParams {
     int inter_latency       = 1;
     int inter_width         = 128;       // bits (informational; not modeled in flit sim)
     int vcs_per_vnet        = 4;
+    // CMesh support: total NIs to create. 0 = one NI per router (default).
+    // Set to num_cpus when num_cpus > num_routers for concentrated mesh.
+    int num_cpus            = 0;
 };
 
 class Topology {
@@ -56,8 +59,12 @@ protected:
                         std::string src_out_dir, std::string dest_in_dir,
                         int latency = 1);
 
-    // Helper to connect NI to Router
-    void connectNiToRouter(int ni_id, int router_id, int link_id_base);
+    // Helper to connect NI to Router.
+    // local_dir: direction name used for the local NI port on the router.
+    // Default "Local" for standard topologies; use "Local_N" for CMesh
+    // concentration (multiple NIs per router) to keep port names unique.
+    void connectNiToRouter(int ni_id, int router_id, int link_id_base,
+                           const std::string& local_dir = "Local");
 
     GarnetNetwork* m_net;
     int m_rows;

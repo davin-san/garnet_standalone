@@ -424,6 +424,7 @@ int main(int argc, char** argv) {
     tparams.inter_latency  = config.inter_latency;
     tparams.inter_width    = config.inter_width;
     tparams.vcs_per_vnet   = config.vcs_per_vnet;
+    tparams.num_cpus       = config.num_cpus; // 0 = derive from routers (default)
 
     Topology* topo = Topology::create(config.topology, &network,
                                       config.num_rows, config.num_cols,

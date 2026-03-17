@@ -94,6 +94,18 @@ public:
     // Map dir_id -> router_id in the current target topology.
     int dir_to_router(int dir_id) const;
 
+    // Map dir_id -> NI id of the directory NI at that router.
+    // For standard topologies (concentration=1): same as dir_to_router().
+    // For CMesh (concentration>1): dir_to_router(dir) * concentration (first NI on that router).
+    int dir_to_ni(int dir_id) const;
+
+    // NIs per physical router (1 for standard mesh, >1 for CMesh).
+    int concentration() const { return m_concentration; }
+
+    // Actual number of NIs in the topology (set in init()).
+    // Use this — not num_cpus() — for routing bounds and array sizing.
+    int num_nodes() const { return m_num_routers; }
+
     // Select response size (1 or data_packet_flits) using correlated sizing.
     int select_response_size(std::mt19937& rng,
                              std::uniform_real_distribution<double>& dist) const;
@@ -132,7 +144,8 @@ private:
     bool           m_done;
     int            m_mshr_limit;
     int            m_seed;
-    int                m_num_routers;   // set in init(); used by no_remap
+    int                m_num_routers;    // set in init(); == num_cpus (node count for packet threshold)
+    int                m_concentration; // NIs per physical router (1 = standard, >1 = CMesh)
     PaceAblationConfig m_ablation;
 
     int      m_target_packets_per_node;

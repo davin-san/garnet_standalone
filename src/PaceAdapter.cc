@@ -8,6 +8,7 @@
 #include <iostream>
 #include <algorithm>
 #include <numeric>
+#include <set>
 #include <sstream>
 
 namespace garnet {
@@ -152,12 +153,14 @@ flit* PaceTrafficGenerator::send_flit()
         // Request or writeback -> goes to a directory.
         int dir = m_adapter->select_dest_dir(m_rng, m_dist);
         dest_router = m_adapter->dir_to_router(dir);
-        dest_ni     = dest_router; // NI_i connects to router_i in a mesh
+        dest_ni     = m_adapter->dir_to_ni(dir); // first NI on that router
     } else {
         // vnet 1 injected by core -> goes to a random other core.
-        int num_cpus = m_adapter->num_cpus();
-        if (num_cpus <= 1) return nullptr;  // no other core to send to
-        std::uniform_int_distribution<int> core_dist(0, num_cpus - 2);
+        // Use num_nodes() (actual NI count) not num_cpus() (profile value) so
+        // dest_ni is always within [0, num_nis-1] regardless of profile mismatch.
+        int num_nodes = m_adapter->num_nodes();
+        if (num_nodes <= 1) return nullptr;  // no other core to send to
+        std::uniform_int_distribution<int> core_dist(0, num_nodes - 2);
         int r = core_dist(m_rng);
         dest_ni     = (r >= m_id) ? r + 1 : r;
         dest_router = m_net_ptr->get_router_id(dest_ni, vnet);
@@ -250,7 +253,7 @@ PaceAdapter::PaceAdapter(const std::string& profile_path,
       m_done(false), m_mshr_limit(mshr_limit), m_seed(seed),
       m_total_latency_sum(0), m_total_packets_received(0),
       m_total_flits_received(0),
-      m_num_routers(0), m_ablation(ablation),
+      m_num_routers(0), m_concentration(1), m_ablation(ablation),
       m_target_packets_per_node(packets_per_node),
       m_temporal_floor(temporal_floor), m_diameter(10)
 {
@@ -385,7 +388,18 @@ void PaceAdapter::init(const std::vector<NetworkInterface*>& nis,
 {
     m_diameter = diameter;
     int num_nis = (int)nis.size();
-    m_num_routers = num_nis; // NI count == router count in this topology
+    m_num_routers = num_nis; // node count (= num_cpus); used for packet threshold
+
+    // Compute concentration: NIs per physical router.
+    // For standard topologies (1 NI per router), concentration = 1.
+    // For CMesh (multiple NIs per router), concentration = num_nis / num_physical_routers.
+    {
+        std::set<int> unique_routers;
+        for (auto ni : nis) unique_routers.insert(ni->get_router_id(0));
+        int num_physical_routers = (int)unique_routers.size();
+        m_concentration = (num_physical_routers > 0 && num_nis > num_physical_routers)
+                          ? num_nis / num_physical_routers : 1;
+    }
 
     // Build reverse map: router_id -> dir_id (for quick lookup).
     std::map<int, int> router_to_dir;
@@ -394,25 +408,36 @@ void PaceAdapter::init(const std::vector<NetworkInterface*>& nis,
 
     m_tgs.reserve(num_nis);
 
-    // MSHR tracking arrays — one entry per CPU node.
     int num_cpus = m_profile.num_cpus;
-    m_mshr_sum.assign(num_cpus, 0.0);
-    m_mshr_sample_count.assign(num_cpus, 0);
-    m_max_mshr_per_node.assign(num_cpus, 0);
+
+    // Warn if the topology NI count doesn't match the profile's num_cpus.
+    // This usually means --num-cpus was omitted or set incorrectly for CMesh.
+    if (num_nis != num_cpus) {
+        std::cerr << "PACE WARNING: topology has " << num_nis
+                  << " NIs but profile expects num_cpus=" << num_cpus << ".\n";
+        if (num_nis < num_cpus)
+            std::cerr << "  For CMesh topologies, pass --num-cpus=" << num_cpus
+                      << " to create the correct number of NIs.\n";
+    }
+
+    // MSHR tracking arrays — sized to cover all actual NI ids (0..num_nis-1).
+    // Use max(num_cpus, num_nis) so the array is valid regardless of which is larger.
+    int mshr_array_size = std::max(num_cpus, num_nis);
+    m_mshr_sum.assign(mshr_array_size, 0.0);
+    m_mshr_sample_count.assign(mshr_array_size, 0);
+    m_max_mshr_per_node.assign(mshr_array_size, 0);
 
     for (int i = 0; i < num_nis; ++i) {
         NetworkInterface* ni = nis[i];
         int router_id = ni->get_router_id(0); // vnet 0 router
 
-        // NI index i == router_id in this topology (each router has exactly
-        // one NI and they are numbered identically).  NIs 0..num_cpus-1 are
-        // core nodes; NIs num_cpus..num_nis-1 are directory/IO nodes.
-        // per_router_injection in the profile may include entries for all
-        // routers (including directories), but directory TGs never reach the
-        // injection probability check — the !m_is_core guard in send_flit()
-        // exits before get_injection_prob() is called.
+        // All NIs 0..num_nis-1 are CPU nodes.
+        // For CMesh: NI i is on router i/concentration; directory NIs are the
+        // *first* NI on each gateway router (i % concentration == 0 && router is dir).
+        // For standard: NI i == router i; directories are NIs whose router is a gateway.
         bool is_core = (i < num_cpus);
-        bool is_dir  = (router_to_dir.count(router_id) > 0);
+        bool is_dir  = (router_to_dir.count(router_id) > 0) &&
+                       (m_concentration == 1 || (i % m_concentration == 0));
 
         PaceTrafficGenerator* tg = new PaceTrafficGenerator(
             i, net, ni, this,
@@ -425,7 +450,9 @@ void PaceAdapter::init(const std::vector<NetworkInterface*>& nis,
 
     std::cout << "PACE: created " << num_nis << " PaceTrafficGenerators"
               << "  (" << num_cpus << " cores, "
-              << m_profile.num_dirs << " dirs)\n";
+              << m_profile.num_dirs << " dirs)\n"
+              << "  concentration=" << m_concentration
+              << " (" << num_nis / m_concentration << " physical routers)\n";
     for (const auto& kv : m_profile.directory_remapping)
         std::cout << "  dir " << kv.first << " -> router " << kv.second << "\n";
 
@@ -518,14 +545,19 @@ uint64_t PaceAdapter::total_network_cycles() const
     return total;
 }
 
-double PaceAdapter::get_injection_prob(int router_id) const
+double PaceAdapter::get_injection_prob(int ni_id) const
 {
     const auto& ph = current_phase();
-    // --pace-no-per-source: all routers use the same average rate (lambda).
+    // --pace-no-per-source: all nodes use the same average rate (lambda).
     if (m_ablation.no_per_source)
         return ph.lambda;
+    // per_router_prob is keyed by physical router_id.
+    // For CMesh (concentration > 1): ni_id / concentration = router_id,
+    // and the per-NI rate = per-router rate / concentration.
+    int router_id = ni_id / m_concentration;
     auto it = ph.per_router_prob.find(router_id);
-    return (it != ph.per_router_prob.end()) ? it->second : 0.0;
+    if (it == ph.per_router_prob.end()) return 0.0;
+    return it->second / m_concentration;
 }
 
 double PaceAdapter::get_data_frac() const
@@ -562,14 +594,24 @@ int PaceAdapter::select_dest_dir(std::mt19937& rng,
 
 int PaceAdapter::dir_to_router(int dir_id) const
 {
-    // --pace-no-remap: identity mapping (dir d -> router d, modulo num_routers).
+    // --pace-no-remap: identity mapping (dir d -> router d, modulo num_physical_routers).
     if (m_ablation.no_remap) {
-        int n = m_num_routers > 0 ? m_num_routers : m_profile.num_dirs;
-        return dir_id % n;
+        int num_physical = (m_concentration > 0) ? m_num_routers / m_concentration
+                                                 : m_num_routers;
+        if (num_physical <= 0) num_physical = m_profile.num_dirs;
+        return dir_id % num_physical;
     }
     auto it = m_profile.directory_remapping.find(dir_id);
     if (it != m_profile.directory_remapping.end()) return it->second;
     return dir_id; // identity fallback
+}
+
+int PaceAdapter::dir_to_ni(int dir_id) const
+{
+    // Returns the NI id of the directory at dir_id's gateway router.
+    // For standard topologies (concentration=1): same as dir_to_router().
+    // For CMesh (concentration>1): first NI on the gateway router.
+    return dir_to_router(dir_id) * m_concentration;
 }
 
 int PaceAdapter::select_response_size(std::mt19937& rng,
