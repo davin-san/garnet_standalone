@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include "flit.hh"
+#include "StandaloneStats.hh"
 
 namespace garnet {
 
@@ -37,6 +38,13 @@ public:
     virtual uint64_t get_injection_attempts() = 0;
     virtual uint64_t get_received_vnet(int)   = 0;
     virtual uint64_t get_latency_vnet(int)    = 0;
+
+    // Latency histogram — overridden by SimpleTrafficGenerator.
+    // PaceTrafficGenerator keeps the histogram in PaceAdapter; returns empty here.
+    virtual const LatHist& get_lat_hist() const {
+        static const LatHist empty;
+        return empty;
+    }
 };
 
 } // namespace garnet

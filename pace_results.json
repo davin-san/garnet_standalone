@@ -1,10 +1,10 @@
 {
   "packet_stats": {
-    "total_packets_received": 0,
-    "total_flits_received": 0,
-    "avg_latency_cycles": 0,
+    "total_packets_received": 155,
+    "total_flits_received": 155,
+    "avg_latency_cycles": 9.65806,
     "p99_latency_cycles": 0,
-    "throughput_flits_per_cycle": 0
+    "throughput_flits_per_cycle": 1.55
   },
   "saturation": {
     "near_saturation": false,

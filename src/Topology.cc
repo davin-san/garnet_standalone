@@ -34,6 +34,10 @@ Topology* Topology::create(std::string name, GarnetNetwork* net,
         return new MeshTopology(net, rows, cols, depth);
     }
 
+    if (name == "T4" || name == "Star") {
+        return new StarTopology(net, params.num_cpus > 0 ? params.num_cpus : 16);
+    }
+
     if (name == "PACE_Chiplet" || name == "PACE_Chiplet_CMesh") {
         return new ChipletTopology(net, params);
     }
@@ -504,6 +508,74 @@ void ChipletTopology::build()
 int ChipletTopology::get_diameter() const
 {
     return m_diameter;
+}
+
+// ============================================================
+// StarTopology implementation
+// ============================================================
+
+void StarTopology::build()
+{
+    // num_routers = m_num_nodes
+    int num_routers = m_num_nodes;
+    for (int i = 0; i < num_routers; ++i) {
+        GarnetRouterParams rp;
+        rp.id = i;
+        rp.x = i; rp.y = 0; rp.z = 0; // dummy coordinates
+        rp.virtual_networks = m_num_vns;
+        rp.vcs_per_vnet = m_vcs_per_vnet;
+        rp.latency = 1;
+        rp.network_ptr = m_net;
+        m_routers.push_back(new Router(rp));
+
+        NetworkInterface::Params ni_p;
+        ni_p.id = i;
+        ni_p.x = i; ni_p.y = 0; ni_p.z = 0;
+        ni_p.virtual_networks = m_num_vns;
+        ni_p.vcs_per_vnet = m_vcs_per_vnet;
+        ni_p.deadlock_threshold = 1000;
+        ni_p.net_ptr = m_net;
+        m_nis.push_back(new NetworkInterface(ni_p));
+    }
+
+    // Connect NIs to Routers
+    for (int i = 0; i < num_routers; ++i) {
+        connectNiToRouter(i, i, m_link_id_counter);
+        m_link_id_counter += 4;
+    }
+
+    // Connect leaf routers (1..num_routers-1) to center router (0)
+    for (int i = 1; i < num_routers; ++i) {
+        // leaf -> center
+        connectRouters(i, 0, m_link_id_counter, "ToCenter", "FromLeaf" + std::to_string(i));
+        m_link_id_counter += 2;
+        // center -> leaf
+        connectRouters(0, i, m_link_id_counter, "ToLeaf" + std::to_string(i), "FromCenter");
+        m_link_id_counter += 2;
+    }
+
+    // Dijkstra routing
+    for (int src = 0; src < num_routers; ++src) {
+        for (int dest_ni = 0; dest_ni < num_routers; ++dest_ni) {
+            int dest_router = dest_ni;
+            if (src == dest_router) {
+                int port = m_routers[src]->getOutportIndex("Local");
+                m_routers[src]->addRouteForPort(port, dest_ni);
+            } else if (src == 0) {
+                // center -> leaf
+                int port = m_routers[src]->getOutportIndex("ToLeaf" + std::to_string(dest_router));
+                m_routers[src]->addRouteForPort(port, dest_ni);
+            } else if (dest_router == 0) {
+                // leaf -> center
+                int port = m_routers[src]->getOutportIndex("ToCenter");
+                m_routers[src]->addRouteForPort(port, dest_ni);
+            } else {
+                // leaf -> center -> leaf
+                int port = m_routers[src]->getOutportIndex("ToCenter");
+                m_routers[src]->addRouteForPort(port, dest_ni);
+            }
+        }
+    }
 }
 
 } // namespace garnet

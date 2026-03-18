@@ -109,13 +109,14 @@ public:
             uint64_t latency = current_time - flt->get_enqueue_time();
             m_total_latency += latency;
             m_received_packets++;
+            m_lat_hist.insert(latency);
             int vnet = flt->get_vnet();
             if (vnet < (int)m_received_per_vnet.size()) {
                 m_received_per_vnet[vnet]++;
                 m_latency_per_vnet[vnet] += latency;
             }
         }
-        delete flt; 
+        delete flt;
     }
 
     uint64_t get_total_latency()      override { return m_total_latency; }
@@ -125,6 +126,8 @@ public:
 
     uint64_t get_received_vnet(int vnet) override { return m_received_per_vnet[vnet]; }
     uint64_t get_latency_vnet(int vnet)  override { return m_latency_per_vnet[vnet]; }
+
+    const LatHist& get_lat_hist() const override { return m_lat_hist; }
 
     void schedule_next_injection(uint64_t) override {}
     uint64_t get_next_injection_time() const override { return 0; }
@@ -172,6 +175,7 @@ private:
     bool m_trace_packet = false;
     uint64_t m_last_injection_cycle;
 
+    LatHist  m_lat_hist;
     uint64_t m_total_latency;
     uint64_t m_received_packets;
     uint64_t m_injected_packets;

@@ -103,6 +103,16 @@ private:
     int m_diameter = 0;
 };
 
+class StarTopology : public Topology {
+public:
+    StarTopology(GarnetNetwork* net, int num_nodes)
+        : Topology(net, 1, 1, 1), m_num_nodes(num_nodes) {}
+    void build() override;
+    int get_diameter() const override { return 2; }
+private:
+    int m_num_nodes;
+};
+
 } // namespace garnet
 
 #endif // __GARNET_STANDALONE_TOPOLOGY_HH__

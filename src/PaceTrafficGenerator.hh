@@ -54,10 +54,14 @@ public:
         return (size_t)v < m_latency_per_vnet.size() ? m_latency_per_vnet[v] : 0;
     }
     // PACE-specific (not in base class).
-    int  get_mshr_count()     const { return m_mshr_count; }
-    int  get_max_mshr_count() const { return m_max_mshr_count; }
-    bool is_core()            const { return m_is_core; }
-    bool is_directory()       const { return m_is_directory; }
+    int      get_mshr_count()         const { return m_pending_requests; }
+    int      get_max_mshr_count()     const { return m_max_mshr_count; }
+    uint64_t get_mshr_stall_cycles()  const { return m_mshr_stall_cycles; }
+    bool     is_core()                const { return m_is_core; }
+    bool     is_directory()           const { return m_is_directory; }
+
+    // --- Burst Logic (Step 3) ---
+    void update_burst_parameters(double lambda, double variance);
 
     // --- Setters (override base; most are no-ops in PACE mode) ---
     void set_packet_size(int)       override {}
@@ -87,14 +91,22 @@ private:
     bool m_is_core;
     bool m_is_directory;
     int  m_mshr_limit;
-    int  m_mshr_count;
+    int  m_pending_requests;
     int  m_max_mshr_count;
+    uint64_t m_mshr_stall_cycles;
+
+    // Step 3: ON/OFF Markov State Machine
+    bool   m_is_bursting;
+    double m_prob_stay_on;
+    double m_prob_stay_off;
+    int    m_last_phase_idx;
 
     std::queue<flit*>         m_flit_queue;      // current outbound packet
     flit*                     m_stalled_flit;    // requeued if NI VC was full
     std::queue<ResponseJob>   m_pending_responses;
 
     uint64_t m_last_injection_cycle;
+    uint64_t m_last_drain_cycle;
     uint64_t m_total_latency;
     uint64_t m_received_packets;
     uint64_t m_injected_packets;

@@ -13,6 +13,7 @@
 #include "PaceTrafficGenerator.hh"
 #include "NetworkInterface.hh"
 #include "NetworkLink.hh"
+#include "StandaloneStats.hh"
 
 namespace garnet {
 
@@ -26,6 +27,7 @@ struct PaceAblationConfig {
     bool no_remap         = false;
     bool no_weighted_dest = false;
     bool no_corr_response = false;
+    bool no_burst         = false;  // --burst-model=off: use smooth Poisson
 };
 
 class PaceAdapter {
@@ -73,6 +75,7 @@ public:
     int data_packet_flits() const { return m_profile.model.data_packet_flits; }
     int ctrl_packet_flits() const { return m_profile.model.ctrl_packet_flits; }
     bool no_mshr()          const { return m_ablation.no_mshr; }
+    bool no_burst()         const { return m_ablation.no_burst; }
 
     // Per-router injection probability for the current phase.
     // Returns 0 for nodes not in per_router_injection (non-CPU nodes).
@@ -98,6 +101,11 @@ public:
     // For standard topologies (concentration=1): same as dir_to_router().
     // For CMesh (concentration>1): dir_to_router(dir) * concentration (first NI on that router).
     int dir_to_ni(int dir_id) const;
+
+    // Step 2 & 3 Helpers
+    double get_avg_latency() const { return current_phase().avg_packet_latency; }
+    double get_variance()    const { return current_phase().variance; }
+    int    get_mshr_limit()  const { return m_mshr_limit; }
 
     // NIs per physical router (1 for standard mesh, >1 for CMesh).
     int concentration() const { return m_concentration; }
@@ -125,9 +133,26 @@ public:
                       const std::vector<NetworkLink*>& links,
                       uint64_t total_cycles) const;
 
+    // Same as dump_results but also records the lambda_multiplier in the JSON.
+    // Used by sweep mode.
+    void dump_results_with_multiplier(const std::string& path,
+                                      const std::vector<NetworkLink*>& links,
+                                      uint64_t total_cycles,
+                                      double lambda_multiplier) const;
+
+    // Scale all per_router_prob and lambda values by multiplier.
+    // Used by sweep mode before each run.
+    void scale_lambda(double multiplier);
+
     // Override directory remapping from profile (call before init()).
     // remap[dir_id] = router_id in the target topology.
     void set_directory_remapping(const std::map<int,int>& remap);
+
+    // Optional metadata stored in output JSON (set before dump_results).
+    void set_topo_id(const std::string& id) { m_topo_id = id; }
+    void set_inter_config(int latency, int width) {
+        m_inter_latency = latency; m_inter_width = width;
+    }
 
 private:
     const PacePhase& current_phase() const {
@@ -155,8 +180,7 @@ private:
     std::vector<PaceTrafficGenerator*> m_tgs;
 
     // ---- Global metrics ----
-    // Sparse latency histogram: latency (cycles) -> count.
-    std::map<uint64_t, uint64_t> m_latency_histogram;
+    LatHist                      m_lat_hist;  // from StandaloneStats.hh
     std::vector<PhaseMetrics>    m_phase_metrics;
     uint64_t m_total_latency_sum;
     uint64_t m_total_packets_received;
@@ -166,6 +190,13 @@ private:
     std::vector<double>   m_mshr_sum;          // per node
     std::vector<uint64_t> m_mshr_sample_count; // per node
     std::vector<int>      m_max_mshr_per_node; // per node
+
+    // Output metadata (set via setters before dump_results)
+    std::string m_topo_id = "";
+    int         m_inter_latency = 0;
+    int         m_inter_width   = 0;
+
+    std::string compute_method() const;
 };
 
 } // namespace garnet

@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cmath>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <algorithm>
 #include <numeric>
@@ -24,9 +25,13 @@ PaceTrafficGenerator::PaceTrafficGenerator(int id, GarnetNetwork* net,
                                            int mshr_limit, int seed)
     : m_id(id), m_net_ptr(net), m_ni(ni), m_adapter(adapter),
       m_is_core(is_core), m_is_directory(is_directory),
-      m_mshr_limit(mshr_limit), m_mshr_count(0), m_max_mshr_count(0),
+      m_mshr_limit(mshr_limit), m_pending_requests(0), m_max_mshr_count(0),
+      m_mshr_stall_cycles(0),
+      m_is_bursting(false), m_prob_stay_on(0.0), m_prob_stay_off(1.0),
+      m_last_phase_idx(-1),
       m_stalled_flit(nullptr),
       m_last_injection_cycle(static_cast<uint64_t>(-1)),
+      m_last_drain_cycle(static_cast<uint64_t>(-1)),
       m_total_latency(0), m_received_packets(0),
       m_injected_packets(0), m_injection_attempts(0),
       m_trace(false),
@@ -76,9 +81,45 @@ void PaceTrafficGenerator::generate_packet(int dest_ni, int dest_router,
     }
 }
 
+void PaceTrafficGenerator::update_burst_parameters(double lambda, double variance)
+{
+    // Step 3: calculate state transition probabilities
+    double Cv2 = (lambda > 0.0) ? variance / (1.0 / (lambda * lambda)) : 0.0;
+    // (User said Cv2 = variance * (lambda * lambda). 
+    // Standard def for inter-arrival time is mean=1/lambda, var=variance. 
+    // Cv2 = variance / (mean^2) = variance * lambda^2. Correct.)
+    Cv2 = variance * (lambda * lambda);
+
+    if (lambda >= 1.0) {
+        m_prob_stay_on  = 1.0;
+        m_prob_stay_off = 0.0;
+    } else if (Cv2 > 1.0) {
+        // peak_rate = 1.0
+        m_prob_stay_on  = 1.0 - (1.0 / (Cv2 + 1.0));
+        m_prob_stay_off = 1.0 - (lambda / (1.0 - lambda)) * (1.0 - m_prob_stay_on);
+    } else {
+        m_prob_stay_on  = 0.0;
+        m_prob_stay_off = 1.0 - lambda;
+    }
+}
+
 flit* PaceTrafficGenerator::send_flit()
 {
     uint64_t t = current_time();
+
+    // Step 2 Hack: drain MSHRs (pending requests)
+    if (m_pending_requests > 0 && t != m_last_drain_cycle) {
+        m_last_drain_cycle = t;
+        // Drain probability: 1.0 / avg_lat. 
+        // We use current phase's avg_packet_latency.
+        double avg_lat = m_adapter->get_avg_latency();
+        if (avg_lat > 0.0) {
+            if (m_dist(m_rng) < (1.0 / avg_lat)) {
+                --m_pending_requests;
+                m_adapter->record_mshr_sample(m_id, m_pending_requests);
+            }
+        }
+    }
 
     // (A) Return previously stalled flit (already generated, just retrying).
     if (m_stalled_flit) {
@@ -114,22 +155,56 @@ flit* PaceTrafficGenerator::send_flit()
     }
 
     // Priority 2: new request (core role only).
-    // Directory nodes (m_id >= num_cpus, m_is_core=false) must NOT inject
-    // new request traffic — they only generate responses via Priority 1.
-    // This correctly handles profiles where per_router_injection has non-zero
-    // entries for directory routers (e.g., from crossbar_activity counting
-    // forwarded coherence messages in the extraction mesh).
     if (!m_is_core) return nullptr;
 
     // No new injection after all phases are exhausted (drain window).
     if (m_adapter->is_done()) return nullptr;
 
-    // Hard MSHR cap (skipped when --pace-no-mshr is active).
-    if (!m_adapter->no_mshr() && m_mshr_count >= m_mshr_limit) return nullptr;
+    // Update phase-specific parameters if needed
+    int current_ph = m_adapter->current_phase_idx();
+    if (current_ph != m_last_phase_idx) {
+        double ph_lambda = m_adapter->get_injection_prob(m_id);
+        double ph_variance = m_adapter->get_variance();
+        update_burst_parameters(ph_lambda, ph_variance);
+        m_mshr_limit = m_adapter->get_mshr_limit();
+        m_last_phase_idx = current_ph;
+    }
 
-    // Probabilistic injection check.
-    double prob = m_adapter->get_injection_prob(m_id);
-    if (prob <= 0.0 || m_dist(m_rng) >= prob) return nullptr;
+    // Step 3: Probabilistic injection check with Burst Model
+    double lambda = m_adapter->get_injection_prob(m_id);
+    double variance = m_adapter->get_variance();
+    double Cv2 = variance * (lambda * lambda);
+
+    bool would_inject = false;
+    // --burst-model=off forces smooth Poisson regardless of variance
+    bool use_burst = (Cv2 > 1.0) && !m_adapter->no_burst();
+    if (!use_burst) {
+        // Smooth traffic: standard uniform random (Poisson)
+        if (lambda > 0.0 && m_dist(m_rng) < lambda) would_inject = true;
+    } else {
+        // Bursty traffic: ON/OFF Markov state machine
+        if (m_is_bursting) {
+            would_inject = true; // ON state
+            // Transition check for NEXT cycle
+            if (m_dist(m_rng) > m_prob_stay_on) m_is_bursting = false;
+        } else {
+            // Transition check for NEXT cycle
+            if (m_dist(m_rng) > m_prob_stay_off) m_is_bursting = true;
+            would_inject = false; // OFF state
+        }
+    }
+
+    if (!would_inject) return nullptr;
+
+    // Step 2: Hard MSHR cap (skipped when --pace-no-mshr is active).
+    if (!m_adapter->no_mshr() && m_pending_requests >= m_mshr_limit) {
+        m_mshr_stall_cycles++;
+        return nullptr;
+    }
+
+    bool should_inject = true; // we already checked would_inject and MSHR
+
+    if (!should_inject) return nullptr;
 
     // Virtual network selection.
     int vnet = m_adapter->select_vnet(m_rng, m_dist);
@@ -175,13 +250,11 @@ flit* PaceTrafficGenerator::send_flit()
                   << " dest_ni=" << dest_ni << " t=" << t << "\n";
     }
 
-    // MSHR: only track vnet 0 (requests).
-    if (vnet == 0) {
-        ++m_mshr_count;
-        if (m_mshr_count > m_max_mshr_count)
-            m_max_mshr_count = m_mshr_count;
-        m_adapter->record_mshr_sample(m_id, m_mshr_count);
-    }
+    // MSHR: track all successful core injections (Step 2)
+    ++m_pending_requests;
+    if (m_pending_requests > m_max_mshr_count)
+        m_max_mshr_count = m_pending_requests;
+    m_adapter->record_mshr_sample(m_id, m_pending_requests);
 
     flit* fl = m_flit_queue.front();
     m_flit_queue.pop();
@@ -212,12 +285,7 @@ void PaceTrafficGenerator::receive_flit(flit* flt)
                                           vnet, num_flits);
 
         // MSHR decrement: any vnet 1 arriving at a core frees a slot.
-        if (m_is_core && vnet == 1) {
-            if (m_mshr_count > 0) {
-                --m_mshr_count;
-                m_adapter->record_mshr_sample(m_id, m_mshr_count);
-            }
-        }
+        // REMOVED for IPP model hack: we use probabilistic drain in send_flit.
 
         // Response generation: directories respond to requests.
         if (m_is_directory && (vnet == 0 || vnet == 2)) {
@@ -496,7 +564,7 @@ bool PaceAdapter::tick(uint64_t /*current_cycle*/)
     const PacePhase& ph = m_profile.phases[m_current_phase];
 
     uint64_t floor_threshold  = (uint64_t)(m_temporal_floor * m_diameter);
-    uint64_t packet_threshold = (uint64_t)(m_target_packets_per_node * m_num_routers);
+    uint64_t packet_threshold = (uint64_t)(100 * m_target_packets_per_node * m_num_routers);
     bool time_floor_met   = m_cycles_in_phase > floor_threshold;
     bool packet_target_met = m_packets_in_current_phase >= packet_threshold;
     // Fallback: phase ran its full allocated duration with no early convergence.
@@ -628,7 +696,7 @@ int PaceAdapter::select_response_size(std::mt19937& rng,
 void PaceAdapter::record_packet_received(uint64_t latency, int phase_idx,
                                           int /*vnet*/, int num_flits)
 {
-    m_latency_histogram[latency]++;
+    m_lat_hist.insert(latency);
     m_total_latency_sum += latency;
     ++m_total_packets_received;
     ++m_packets_in_current_phase;
@@ -650,24 +718,31 @@ void PaceAdapter::record_mshr_sample(int node_id, int count)
         m_max_mshr_per_node[node_id] = count;
 }
 
-// ---- 99th-percentile helper ----
-static uint64_t percentile99(const std::map<uint64_t, uint64_t>& hist)
+std::string PaceAdapter::compute_method() const
 {
-    if (hist.empty()) return 0;
-    uint64_t total = 0;
-    for (const auto& kv : hist) total += kv.second;
-    uint64_t threshold = (uint64_t)std::ceil(0.99 * total);
-    uint64_t cumulative = 0;
-    for (const auto& kv : hist) {
-        cumulative += kv.second;
-        if (cumulative >= threshold) return kv.first;
-    }
-    return hist.rbegin()->first;
+    // Priority order: first matching flag determines the variant name.
+    if (m_ablation.no_per_source)    return "No-PerSource";
+    if (m_ablation.no_phases)        return "No-Phases";
+    if (m_ablation.no_mshr || m_mshr_limit == 0) return "No-MSHR";
+    if (m_ablation.no_remap)         return "No-Remap";
+    if (m_ablation.no_weighted_dest) return "No-WeightDest";
+    if (m_ablation.no_corr_response) return "No-CorrResp";
+    if (m_ablation.no_burst)         return "No-Burst";
+    return "pace";
 }
 
 void PaceAdapter::dump_results(const std::string& path,
                                 const std::vector<NetworkLink*>& links,
                                 uint64_t total_cycles) const
+{
+    dump_results_with_multiplier(path, links, total_cycles, 1.0);
+}
+
+void PaceAdapter::dump_results_with_multiplier(
+        const std::string& path,
+        const std::vector<NetworkLink*>& links,
+        uint64_t total_cycles,
+        double lambda_multiplier) const
 {
     std::ofstream f(path);
     if (!f.is_open()) {
@@ -678,17 +753,37 @@ void PaceAdapter::dump_results(const std::string& path,
     double avg_lat = m_total_packets_received > 0
                      ? (double)m_total_latency_sum / m_total_packets_received
                      : 0.0;
-    uint64_t p99   = percentile99(m_latency_histogram);
 
-    // Profile-weighted average latency: L = sum(L_i * P_orig_i) / sum(P_orig_i).
-    // Uses original profile packet counts so high-activity phases dominate,
-    // regardless of how many packets were simulated per phase.
+    double p50     = m_lat_hist.percentile(0.50);
+    double p99     = m_lat_hist.percentile(0.99);
+    double p999    = m_lat_hist.percentile(0.999);
+    double max_lat = m_lat_hist.max_latency();
+
+    // Aggregate MSHR stalls
+    uint64_t total_mshr_stalls = 0;
+    uint64_t total_injected = 0;
+    uint64_t total_injection_attempts = 0;
+    for (auto tg : m_tgs) {
+        total_mshr_stalls        += tg->get_mshr_stall_cycles();
+        total_injected           += tg->get_injected_packets();
+        total_injection_attempts += tg->get_injection_attempts();
+    }
+    double avg_mshr_stall = m_total_packets_received > 0
+                            ? (double)total_mshr_stalls / m_total_packets_received
+                            : 0.0;
+    double injection_blocked_pct = (total_injection_attempts > 0)
+        ? 100.0 * (double)total_mshr_stalls / total_injection_attempts : 0.0;
+
+    // Profile-weighted average latency and per-phase latency list
     double pw_lat_num = 0.0;
     int64_t pw_lat_den = 0;
+    std::vector<double> per_phase_lats;
     for (int i = 0; i < (int)m_phase_metrics.size(); ++i) {
         const auto& pm = m_phase_metrics[i];
+        double ph_avg = pm.packets_received > 0
+                        ? (double)pm.total_latency / pm.packets_received : 0.0;
+        per_phase_lats.push_back(ph_avg);
         if (pm.packets_received > 0) {
-            double ph_avg = (double)pm.total_latency / pm.packets_received;
             int64_t p_orig = m_profile.phases[i].total_packets;
             pw_lat_num += ph_avg * p_orig;
             pw_lat_den += p_orig;
@@ -696,71 +791,185 @@ void PaceAdapter::dump_results(const std::string& path,
     }
     double profile_weighted_avg_lat = (pw_lat_den > 0)
                                       ? pw_lat_num / pw_lat_den : avg_lat;
-    double throughput = total_cycles > 0
-                        ? (double)m_total_flits_received / total_cycles
-                        : 0.0;
 
-    // MSHR saturation analysis.
-    double max_avg_mshr = 0.0;
+    double throughput   = total_cycles > 0
+                          ? (double)m_total_flits_received / total_cycles : 0.0;
+    double offered_load = total_cycles > 0
+                          ? (double)total_injected / total_cycles : 0.0;
+
+    // MSHR saturation analysis
+    double max_avg_mshr = 0.0, sum_avg_mshr = 0.0;
+    int n_nodes_tracked = 0;
     std::vector<int> saturated_nodes;
     for (int i = 0; i < (int)m_mshr_sum.size(); ++i) {
-        double avg_mshr = m_mshr_sample_count[i] > 0
-                          ? m_mshr_sum[i] / m_mshr_sample_count[i]
-                          : 0.0;
+        if (m_mshr_sample_count[i] == 0) continue;
+        double avg_mshr = m_mshr_sum[i] / m_mshr_sample_count[i];
         if (avg_mshr > max_avg_mshr) max_avg_mshr = avg_mshr;
-        if (avg_mshr > 14.0 * m_mshr_limit / 16.0)
+        sum_avg_mshr += avg_mshr;
+        n_nodes_tracked++;
+        if (m_mshr_limit > 0 && avg_mshr > 14.0 * m_mshr_limit / 16.0)
             saturated_nodes.push_back(i);
     }
+    double overall_avg_mshr = n_nodes_tracked > 0
+                              ? sum_avg_mshr / n_nodes_tracked : 0.0;
     bool near_sat = !saturated_nodes.empty();
+    // Also saturate if MSHR was artificially fully blocked (mshr_limit==0 disables MSHR)
+    bool mshr_saturated = near_sat;
 
-    // Link utilizations.
+    // Link utilization
+    struct LinkInfo { int idx; double util; };
+    std::vector<LinkInfo> link_utils;
     double link_util_sum = 0.0, link_util_max = 0.0;
     int num_links = (int)links.size();
-    for (auto* lk : links) {
+    for (int li = 0; li < num_links; ++li) {
         double u = total_cycles > 0
-                   ? (double)lk->getLinkUtilization() / total_cycles
+                   ? (double)links[li]->getLinkUtilization() / total_cycles
                    : 0.0;
+        link_utils.push_back({li, u});
         link_util_sum += u;
         if (u > link_util_max) link_util_max = u;
     }
     double link_util_avg = num_links > 0 ? link_util_sum / num_links : 0.0;
+    std::sort(link_utils.begin(), link_utils.end(),
+              [](const LinkInfo& a, const LinkInfo& b){
+                  return a.util > b.util;
+              });
+
+    // Method string and topo_config
+    std::string method     = compute_method();
+    std::string topo_cfg   = m_topo_id.empty() ? ""
+        : m_topo_id + "_lat" + std::to_string(m_inter_latency)
+          + "_w" + std::to_string(m_inter_width);
+    std::string benchmark  = m_profile.benchmark.empty() ? "unknown"
+                                                         : m_profile.benchmark;
+    double effective_lambda = m_profile.effective_lambda * lambda_multiplier;
 
     // ---- Write JSON ----
+    f << std::fixed << std::setprecision(6);
     f << "{\n";
 
-    // ablation config (true = feature enabled; false = feature disabled/ablated)
+    // ── Spec B.2 top-level fields (flat, required by analysis scripts) ──
+    f << "  \"method\": \""             << method    << "\",\n"
+      << "  \"benchmark\": \""          << benchmark << "\",\n"
+      << "  \"topo_id\": \""            << m_topo_id << "\",\n"
+      << "  \"inter_latency\": "        << m_inter_latency << ",\n"
+      << "  \"inter_width\": "          << m_inter_width   << ",\n"
+      << "  \"topo_config\": \""        << topo_cfg        << "\",\n"
+      << "  \"avg_packet_latency\": "   << avg_lat         << ",\n"
+      << "  \"avg_flit_latency\": "     << avg_lat         << ",\n"  // approx
+      << "  \"p50_latency\": "          << p50             << ",\n"
+      << "  \"p99_latency\": "          << p99             << ",\n"
+      << "  \"p999_latency\": "         << p999            << ",\n"
+      << "  \"max_latency\": "          << max_lat         << ",\n"
+      << "  \"throughput_flits_per_cycle\": "      << throughput              << ",\n"
+      << "  \"offered_load_flits_per_cycle\": "    << offered_load            << ",\n"
+      << "  \"accepted_load_flits_per_cycle\": "   << throughput              << ",\n"
+      << "  \"injection_blocked_pct\": "           << injection_blocked_pct   << ",\n"
+      << "  \"mshr_saturated\": "       << (mshr_saturated ? "true" : "false") << ",\n"
+      << "  \"raw_total_packets\": "    << m_total_packets_received << ",\n"
+      << "  \"raw_total_flits\": "      << m_total_flits_received   << ",\n"
+      << "  \"simulated_cycles\": "     << total_cycles             << ",\n"
+      << "  \"lambda_multiplier\": "    << lambda_multiplier        << ",\n"
+      << "  \"effective_lambda\": "     << effective_lambda         << ",\n"
+      << "  \"profile_weighted_avg_latency\": " << profile_weighted_avg_lat << ",\n"
+      << "  \"per_phase_latencies\": [";
+    for (int i = 0; i < (int)per_phase_lats.size(); ++i) {
+        if (i > 0) f << ", ";
+        f << per_phase_lats[i];
+    }
+    f << "],\n";
+
+    // ── Latency histogram (top-level, spec B.2) ──
+    f << "  \"latency_histogram\": {\n"
+      << "    \"fine_counts\": [";
+    for (size_t i = 0; i < m_lat_hist.fine.size(); ++i) {
+        if (i > 0) f << ", "; f << m_lat_hist.fine[i];
+    }
+    f << "],\n    \"coarse_counts\": [";
+    for (size_t i = 0; i < m_lat_hist.coarse.size(); ++i) {
+        if (i > 0) f << ", "; f << m_lat_hist.coarse[i];
+    }
+    f << "],\n    \"ultra_counts\": [";
+    for (size_t i = 0; i < m_lat_hist.ultra.size(); ++i) {
+        if (i > 0) f << ", "; f << m_lat_hist.ultra[i];
+    }
+    f << "],\n"
+      << "    \"overflow_count\": " << m_lat_hist.overflow << "\n"
+      << "  },\n";
+
+    // ── saturation_detail (spec B.2 name) ──
+    f << "  \"saturation_detail\": {\n"
+      << "    \"max_avg_mshr_occupancy\": "       << max_avg_mshr     << ",\n"
+      << "    \"avg_mshr_occupancy_all_nodes\": " << overall_avg_mshr << ",\n"
+      << "    \"saturated_nodes\": [";
+    for (int i = 0; i < (int)saturated_nodes.size(); ++i) {
+        if (i > 0) f << ", ";
+        f << saturated_nodes[i];
+    }
+    f << "],\n"
+      << "    \"pct_cycles_mshr_full\": " << injection_blocked_pct << "\n"
+      << "  },\n";
+
+    // ── link_utilization (spec B.2) ──
+    f << "  \"link_utilization\": {\n"
+      << "    \"max_link_util\": " << link_util_max << ",\n"
+      << "    \"avg_link_util\": " << link_util_avg << ",\n"
+      << "    \"top5_links\": [";
+    int top5_count = std::min((int)link_utils.size(), 5);
+    for (int i = 0; i < top5_count; ++i) {
+        if (i > 0) f << ", ";
+        f << "{\"link_idx\": " << link_utils[i].idx
+          << ", \"utilization\": " << link_utils[i].util << "}";
+    }
+    f << "]\n  },\n";
+
+    // ── buffer_pressure (placeholder — VC occupancy not yet tracked) ──
+    f << "  \"buffer_pressure\": {\n"
+      << "    \"max_avg_vc_occupancy\": 0.0,\n"
+      << "    \"pct_vc_cycles_above_80\": 0.0\n"
+      << "  },\n";
+
+    // ── Backward-compat nested fields ──
     f << "  \"ablation\": {\n"
       << "    \"per_source\": "    << (!m_ablation.no_per_source    ? "true" : "false") << ",\n"
       << "    \"phases\": "        << (!m_ablation.no_phases        ? "true" : "false") << ",\n"
       << "    \"mshr\": "          << (!m_ablation.no_mshr          ? "true" : "false") << ",\n"
       << "    \"remap\": "         << (!m_ablation.no_remap         ? "true" : "false") << ",\n"
       << "    \"weighted_dest\": " << (!m_ablation.no_weighted_dest ? "true" : "false") << ",\n"
-      << "    \"corr_response\": " << (!m_ablation.no_corr_response ? "true" : "false") << "\n"
+      << "    \"corr_response\": " << (!m_ablation.no_corr_response ? "true" : "false") << ",\n"
+      << "    \"burst\": "         << (!m_ablation.no_burst         ? "true" : "false") << "\n"
       << "  },\n";
 
-    // simulation_summary
     f << "  \"simulation_summary\": {\n"
-      << "    \"total_cycles\": " << total_cycles << ",\n"
-      << "    \"total_phases\": " << m_profile.num_phases << ",\n"
-      << "    \"mshr_limit\": " << m_mshr_limit << ",\n"
-      << "    \"num_cpus\": " << m_profile.num_cpus << ",\n"
-      << "    \"num_dirs\": " << m_profile.num_dirs << "\n"
+      << "    \"total_cycles\": "      << total_cycles         << ",\n"
+      << "    \"total_phases\": "      << m_profile.num_phases << ",\n"
+      << "    \"mshr_limit\": "        << m_mshr_limit         << ",\n"
+      << "    \"num_cpus\": "          << m_profile.num_cpus   << ",\n"
+      << "    \"num_dirs\": "          << m_profile.num_dirs   << ",\n"
+      << "    \"lambda_multiplier\": " << lambda_multiplier    << "\n"
       << "  },\n";
 
-    // packet_stats
     f << "  \"packet_stats\": {\n"
-      << "    \"total_packets_received\": " << m_total_packets_received << ",\n"
-      << "    \"total_flits_received\": " << m_total_flits_received << ",\n"
-      << "    \"avg_latency_cycles\": " << avg_lat << ",\n"
-      << "    \"profile_weighted_avg_latency\": " << profile_weighted_avg_lat << ",\n"
-      << "    \"p99_latency_cycles\": " << p99 << ",\n"
-      << "    \"throughput_flits_per_cycle\": " << throughput << "\n"
+      << "    \"total_packets_received\": "      << m_total_packets_received   << ",\n"
+      << "    \"total_flits_received\": "        << m_total_flits_received     << ",\n"
+      << "    \"avg_latency_cycles\": "           << avg_lat                   << ",\n"
+      << "    \"p50_latency_cycles\": "           << p50                       << ",\n"
+      << "    \"p99_latency_cycles\": "           << p99                       << ",\n"
+      << "    \"p999_latency_cycles\": "          << p999                      << ",\n"
+      << "    \"max_latency_cycles\": "           << max_lat                   << ",\n"
+      << "    \"avg_mshr_stall_cycles\": "        << avg_mshr_stall            << ",\n"
+      << "    \"avg_total_latency_cycles\": "     << avg_lat + avg_mshr_stall  << ",\n"
+      << "    \"profile_weighted_avg_latency\": " << profile_weighted_avg_lat  << ",\n"
+      << "    \"throughput_flits_per_cycle\": "   << throughput                << ",\n"
+      << "    \"offered_load_flits_per_cycle\": " << offered_load              << ",\n"
+      << "    \"accepted_load_flits_per_cycle\": " << throughput               << ",\n"
+      << "    \"injection_blocked_pct\": "        << injection_blocked_pct     << "\n"
       << "  },\n";
 
-    // saturation
     f << "  \"saturation\": {\n"
-      << "    \"near_saturation\": " << (near_sat ? "true" : "false") << ",\n"
-      << "    \"max_avg_mshr_occupancy\": " << max_avg_mshr << ",\n"
+      << "    \"near_saturation\": "             << (near_sat ? "true" : "false") << ",\n"
+      << "    \"max_avg_mshr_occupancy\": "       << max_avg_mshr     << ",\n"
+      << "    \"avg_mshr_occupancy_all_nodes\": " << overall_avg_mshr << ",\n"
       << "    \"saturated_nodes\": [";
     for (int i = 0; i < (int)saturated_nodes.size(); ++i) {
         if (i > 0) f << ", ";
@@ -768,53 +977,47 @@ void PaceAdapter::dump_results(const std::string& path,
     }
     f << "]\n  },\n";
 
-    // per_phase_stats
     f << "  \"per_phase_stats\": [\n";
     for (int i = 0; i < (int)m_phase_metrics.size(); ++i) {
         const auto& pm = m_phase_metrics[i];
         double ph_avg = pm.packets_received > 0
-                        ? (double)pm.total_latency / pm.packets_received
-                        : 0.0;
+                        ? (double)pm.total_latency / pm.packets_received : 0.0;
         f << "    {\n"
-          << "      \"phase_index\": " << i << ",\n"
-          << "      \"packets_received\": " << pm.packets_received << ",\n"
-          << "      \"flits_received\": " << pm.flits_received << ",\n"
-          << "      \"avg_latency_cycles\": " << ph_avg << ",\n"
-          << "      \"profile_lambda\": " << m_profile.phases[i].lambda << ",\n"
-          << "      \"profile_avg_latency\": " << m_profile.phases[i].avg_packet_latency
-          << "\n    }";
+          << "      \"phase_index\": "        << i               << ",\n"
+          << "      \"packets_received\": "   << pm.packets_received << ",\n"
+          << "      \"flits_received\": "     << pm.flits_received   << ",\n"
+          << "      \"avg_latency_cycles\": " << ph_avg              << ",\n"
+          << "      \"profile_lambda\": "     << m_profile.phases[i].lambda << ",\n"
+          << "      \"profile_avg_latency\": "
+          << m_profile.phases[i].avg_packet_latency << "\n    }";
         if (i + 1 < (int)m_phase_metrics.size()) f << ",";
         f << "\n";
     }
-    f << "  ],\n";
-
-    // per_link_utilization
-    f << "  \"per_link_utilization\": {\n"
-      << "    \"num_links\": " << num_links << ",\n"
-      << "    \"avg\": " << link_util_avg << ",\n"
-      << "    \"max\": " << link_util_max << "\n"
-      << "  },\n";
-
-    // latency_histogram (top 20 buckets by count for compactness)
-    f << "  \"latency_histogram_sample\": {";
-    int bucket_count = 0;
-    for (const auto& kv : m_latency_histogram) {
-        if (bucket_count > 0) f << ",";
-        f << "\n    \"" << kv.first << "\": " << kv.second;
-        if (++bucket_count >= 50) break;
-    }
-    f << "\n  }\n";
+    f << "  ]\n";
 
     f << "}\n";
     f.close();
 
-    std::cout << "PACE: results written to " << path << "\n";
-    std::cout << "  avg_latency=" << avg_lat << " cycles"
-              << "  p99=" << p99 << " cycles"
-              << "  throughput=" << throughput << " flits/cycle\n";
-    if (near_sat) {
+    std::cout << "PACE: results written to " << path << "\n"
+              << "  method=" << method
+              << "  avg_lat=" << avg_lat
+              << "  p50=" << p50
+              << "  p99=" << p99
+              << "  p999=" << p999
+              << "  throughput=" << throughput << " flits/cycle\n"
+              << "  injection_blocked=" << injection_blocked_pct << "%\n";
+    if (near_sat)
         std::cout << "  WARNING: " << saturated_nodes.size()
                   << " node(s) near MSHR saturation\n";
+}
+
+void PaceAdapter::scale_lambda(double multiplier)
+{
+    if (multiplier <= 0.0) multiplier = 0.001;
+    for (auto& ph : m_profile.phases) {
+        ph.lambda *= multiplier;
+        for (auto& kv : ph.per_router_prob)
+            kv.second *= multiplier;
     }
 }
 

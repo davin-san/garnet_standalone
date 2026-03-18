@@ -217,6 +217,8 @@ struct PacePhase {
     uint64_t  network_cycles;
     double    lambda;
     double    avg_packet_latency;
+    double    variance;   // Step 1: Inter-arrival variance
+    int       mshr_limit; // Step 1: Per-phase MSHR limit
 
     std::map<int, int64_t> vnet_packets;        // vnet_id -> count
     std::map<int, double>  per_router_injection; // router_id -> fraction (sums to 1)
@@ -246,6 +248,10 @@ struct PaceProfile {
     int mem_channels;
     int num_phases;
 
+    std::string benchmark = "";     // optional: from gem5 profiler
+    std::string topo_id   = "";     // optional: extraction topology id
+    double effective_lambda = 0.0;  // weighted-avg lambda across phases
+
     std::vector<PacePhase>      phases;
     PaceModelAssumptions        model;
     std::map<int, int>          directory_remapping; // dir_id -> router_id in target topo
@@ -262,10 +268,13 @@ struct PaceProfile {
         PaceProfile prof;
         prof.num_cpus      = (int)root["num_cpus"].asInt();
         prof.num_dirs      = (int)root["num_dirs"].asInt();
-        prof.mesh_rows     = (int)root["mesh_rows"].asInt();
-        prof.mesh_cols     = (int)root["mesh_cols"].asInt();
-        prof.mem_channels  = (int)root["mem_channels"].asInt();
+        prof.mesh_rows     = root.hasKey("mesh_rows") ? (int)root["mesh_rows"].asInt() : 0;
+        prof.mesh_cols     = root.hasKey("mesh_cols") ? (int)root["mesh_cols"].asInt() : 0;
+        prof.mem_channels  = root.hasKey("mem_channels") ? (int)root["mem_channels"].asInt() : 0;
         prof.num_phases    = (int)root["num_phases"].asInt();
+
+        if (root.hasKey("benchmark")) prof.benchmark = root["benchmark"].asStr();
+        if (root.hasKey("topo_id"))   prof.topo_id   = root["topo_id"].asStr();
 
         // model_assumptions (optional)
         if (root.hasKey("model_assumptions")) {
@@ -303,6 +312,9 @@ struct PaceProfile {
                 ph.network_cycles = (uint64_t)(ph.sim_ticks / 333);
             ph.lambda            = pv["lambda"].asDouble();
             ph.avg_packet_latency = pv["avg_packet_latency"].asDouble();
+            // Step 1: parse variance and mshr_limit with defaults
+            ph.variance   = pv.hasKey("variance")   ? pv["variance"].asDouble() : 0.0;
+            ph.mshr_limit = pv.hasKey("mshr_limit") ? (int)pv["mshr_limit"].asInt() : 16;
 
             for (const auto& kv : pv["vnet_packets"].asObj())
                 ph.vnet_packets[std::stoi(kv.first)] = kv.second.asInt();
@@ -346,6 +358,19 @@ struct PaceProfile {
             ph.response_data_prob = std::max(0.0, std::min(1.0, data_resp));
 
             prof.phases.push_back(ph);
+        }
+
+        // Compute effective_lambda: weighted average by network_cycles.
+        // Also accept a top-level "lambda" field (new profiler format).
+        if (root.hasKey("lambda")) {
+            prof.effective_lambda = root["lambda"].asDouble();
+        } else {
+            double lam_sum = 0.0; uint64_t cyc_sum = 0;
+            for (const auto& ph : prof.phases) {
+                lam_sum += ph.lambda * ph.network_cycles;
+                cyc_sum += ph.network_cycles;
+            }
+            prof.effective_lambda = (cyc_sum > 0) ? lam_sum / cyc_sum : 0.0;
         }
 
         return prof;

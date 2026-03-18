@@ -1,0 +1,98 @@
+{
+  "ablation": {
+    "per_source": true,
+    "phases": true,
+    "mshr": true,
+    "remap": true,
+    "weighted_dest": true,
+    "corr_response": true
+  },
+  "simulation_summary": {
+    "total_cycles": 6200,
+    "total_phases": 3,
+    "mshr_limit": 16,
+    "num_cpus": 16,
+    "num_dirs": 4
+  },
+  "packet_stats": {
+    "total_packets_received": 4286,
+    "total_flits_received": 9990,
+    "avg_latency_cycles": 14.3563,
+    "avg_mshr_stall_cycles": 0.277881,
+    "avg_total_latency_cycles": 14.6342,
+    "profile_weighted_avg_latency": 14.3355,
+    "p99_latency_cycles": 32,
+    "throughput_flits_per_cycle": 1.61129
+  },
+  "saturation": {
+    "near_saturation": false,
+    "max_avg_mshr_occupancy": 13.1414,
+    "saturated_nodes": []
+  },
+  "per_phase_stats": [
+    {
+      "phase_index": 0,
+      "packets_received": 1628,
+      "flits_received": 3444,
+      "avg_latency_cycles": 13.4613,
+      "profile_lambda": 0.033333,
+      "profile_avg_latency": 35
+    },
+    {
+      "phase_index": 1,
+      "packets_received": 2112,
+      "flits_received": 5468,
+      "avg_latency_cycles": 15.4072,
+      "profile_lambda": 0.05,
+      "profile_avg_latency": 40
+    },
+    {
+      "phase_index": 2,
+      "packets_received": 541,
+      "flits_received": 1057,
+      "avg_latency_cycles": 12.8688,
+      "profile_lambda": 0.02,
+      "profile_avg_latency": 28
+    }
+  ],
+  "per_link_utilization": {
+    "num_links": 80,
+    "avg": 0.0911996,
+    "max": 0.305161
+  },
+  "latency_histogram_sample": {
+    "3": 8,
+    "4": 131,
+    "5": 11,
+    "6": 537,
+    "7": 37,
+    "8": 784,
+    "9": 15,
+    "10": 672,
+    "11": 20,
+    "12": 391,
+    "13": 8,
+    "14": 172,
+    "15": 5,
+    "16": 68,
+    "19": 6,
+    "20": 59,
+    "21": 20,
+    "22": 265,
+    "23": 33,
+    "24": 371,
+    "25": 23,
+    "26": 315,
+    "27": 12,
+    "28": 179,
+    "29": 9,
+    "30": 88,
+    "31": 4,
+    "32": 34,
+    "33": 3,
+    "34": 2,
+    "35": 1,
+    "36": 1,
+    "37": 2
+  }
+}
